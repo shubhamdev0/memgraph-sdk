@@ -4,6 +4,18 @@ All notable changes to the Memgraph SDK will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.0] - 2026-02-27
+
+### Added
+- `remember()` method on both `MemgraphClient` and `AsyncMemgraphClient` for immediate belief storage with vector embedding
+- Memory Intelligence API on `AsyncMemgraphClient`: `health()`, `contradictions()`, `evaluate()`, `mcis()`, `mcis_history()`
+- Benchmark API on `AsyncMemgraphClient`: `benchmark()`, `benchmark_scenarios()`
+- `log_event()` method on `AsyncMemgraphClient` for raw event logging
+- `get_beliefs()` method on `AsyncMemgraphClient`
+
+### Fixed
+- Memories stored via `remember()` are now immediately searchable (bypasses event pipeline)
+
 ## [0.1.1] - 2026-02-27
 
 ### Fixed
