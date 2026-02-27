@@ -8,10 +8,9 @@ Usage:
     memgraph recall     # Search memories
     memgraph status     # Check connection
 """
-import os
-import sys
-import shutil
 import argparse
+import os
+import shutil
 from pathlib import Path
 
 try:

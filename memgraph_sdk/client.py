@@ -1,6 +1,8 @@
 import os
+from typing import Any, Dict, List, Optional
+
 import requests
-from typing import List, Dict, Any, Optional
+
 
 class MemgraphClient:
     def __init__(self, api_key: str, tenant_id: str, base_url: str = None):
@@ -22,10 +24,6 @@ class MemgraphClient:
             "user_id": user_id,
             "text": text,
         }
-        # If we had metadata/files, we would add them here.
-        # Verify if metadata is supported by ingest_omni (it currently isn't in the Form params shown in ingest.py, 
-        # but the logic creates an event with content_payload which we might want to extend later).
-        
         resp = requests.post(f"{self.base_url}/ingest", data=data, headers=self.headers)
         resp.raise_for_status()
         return resp.json()
