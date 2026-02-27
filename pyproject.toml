@@ -1,0 +1,80 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "memgraph-sdk"
+dynamic = ["version"]
+description = "Official Python SDK for Memgraph - the memory graph for AI agents"
+readme = "README.md"
+license = { file = "LICENSE" }
+authors = [
+  { name = "Memgraph Team", email = "sdk@memgraph.ai" },
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+keywords = ["memgraph", "ai", "memory", "agents", "llm", "rag", "context"]
+dependencies = [
+    "requests>=2.25.0",
+    "pydantic>=2.0.0",
+    "typing-extensions>=4.0.0",
+]
+requires-python = ">=3.8"
+
+[project.scripts]
+memgraph = "memgraph_sdk.cli:main"
+
+[project.optional-dependencies]
+async = ["httpx>=0.24.0"]
+cli = ["rich>=13.0.0"]
+all = ["httpx>=0.24.0", "rich>=13.0.0"]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
+    "httpx>=0.24.0",
+    "ruff>=0.1.0",
+]
+
+[project.urls]
+Homepage = "https://memgraph.ai"
+Documentation = "https://memgraph.ai/docs"
+Repository = "https://github.com/shubhamdev0/memgraph-sdk"
+"Bug Tracker" = "https://github.com/shubhamdev0/memgraph-sdk/issues"
+Changelog = "https://github.com/shubhamdev0/memgraph-sdk/blob/main/CHANGELOG.md"
+
+[tool.hatch.version]
+path = "memgraph_sdk/__init__.py"
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "memgraph_sdk/",
+    "LICENSE",
+    "README.md",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["memgraph_sdk"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py38"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]
+ignore = ["E501"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
