@@ -44,7 +44,11 @@ class AsyncMemgraphClient:
         await self._client.aclose()
 
     async def add(self, text: str, user_id: str, metadata: Optional[Dict] = None) -> Dict:
-        """Add a memory via the /ingest endpoint."""
+        """
+        Add a memory via the /ingest endpoint (event pipeline).
+        Note: Events go through the episode pipeline and may take time to become searchable.
+        For immediate searchability, use remember() instead.
+        """
         data = {
             "tenant_id": self.tenant_id,
             "user_id": user_id,
@@ -54,8 +58,38 @@ class AsyncMemgraphClient:
         resp.raise_for_status()
         return resp.json()
 
+    async def remember(self, text: str, user_id: str, category: str = "general",
+                       domain: Optional[str] = None) -> Dict:
+        """
+        Store a memory as a belief with vector embedding for immediate searchability.
+        This is the recommended way to store memories that should be recalled right away.
+        """
+        domain_map = {
+            "decision": "work", "architecture": "tech", "bug_fix": "tech",
+            "preference": "general", "general": "general",
+        }
+        short = text[:60].strip().lower()
+        clean = "".join(c if c.isalnum() or c == " " else "" for c in short)
+        belief_key = f"{category}_{'_'.join(clean.split()[:6])}"
+
+        payload = {
+            "tenant_id": self.tenant_id,
+            "subject_id": user_id,
+            "key": belief_key,
+            "value": text,
+            "confidence": 0.90,
+            "belief_type": "fact" if category in ("bug_fix", "architecture") else "belief",
+            "domain": domain or domain_map.get(category, "general"),
+        }
+        resp = await self._client.post("/beliefs", json=payload)
+        resp.raise_for_status()
+        return resp.json()
+
     async def search(self, query: str, user_id: str, agent_id: str = "sdk_client") -> Dict[str, Any]:
-        """Retrieve relevant context for a query via /context endpoint."""
+        """
+        Retrieve relevant context for a query via /context endpoint.
+        Returns { messages, retrieved_items, debug }.
+        """
         payload = {
             "task": query,
             "user_id": user_id,
