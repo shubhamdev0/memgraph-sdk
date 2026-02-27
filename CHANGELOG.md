@@ -4,6 +4,12 @@ All notable changes to the Memgraph SDK will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.1.1] - 2026-02-27
+
+### Fixed
+- Fix import sorting and lint issues for CI compliance
+- Clean up unused imports and trailing whitespace
+
 ## [0.1.0] - 2026-02-27
 
 ### Added
