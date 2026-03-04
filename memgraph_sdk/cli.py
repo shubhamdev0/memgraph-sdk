@@ -77,31 +77,47 @@ def get_package_dir():
     return Path(__file__).parent.parent
 
 
-def init_project():
-    """Initialize Memgraph in the current project."""
+def init_project(non_interactive: bool = False):
+    """Initialize Memgraph in the current project.
+
+    In non-interactive mode, reads config from environment variables:
+    - MEMGRAPH_API_URL (default: cloud)
+    - MEMGRAPH_TENANT_ID (required)
+    - MEMGRAPH_API_KEY (optional)
+    """
     print("🚀 Memgraph Agent Memory Setup\n")
 
-    # 1. Choose deployment mode
-    print("Where is your Memgraph server running?")
-    print("  1) Cloud (api.memgraph.ai)")
-    print("  2) On-prem / Local (localhost:8001)")
-    print("  3) Custom URL")
+    if non_interactive:
+        # Non-interactive: read from env vars (CI/CD, Docker, scripts)
+        api_url = os.getenv("MEMGRAPH_API_URL", CLOUD_URL)
+        tenant_id = os.getenv("MEMGRAPH_TENANT_ID", "")
+        api_key = os.getenv("MEMGRAPH_API_KEY", "")
 
-    choice = input("\nChoose [1/2/3]: ").strip()
-
-    if choice == "1":
-        api_url = CLOUD_URL
-    elif choice == "2":
-        api_url = LOCAL_URL
-    elif choice == "3":
-        api_url = input("Enter API URL: ").strip()
+        if not tenant_id:
+            print("❌ MEMGRAPH_TENANT_ID environment variable is required in non-interactive mode.")
+            return
     else:
-        print("Invalid choice")
-        return
+        # Interactive: prompt user
+        print("Where is your Memgraph server running?")
+        print("  1) Cloud (api.memgraph.ai)")
+        print("  2) On-prem / Local (localhost:8001)")
+        print("  3) Custom URL")
 
-    # 2. Get credentials
-    tenant_id = input("\nTenant ID: ").strip()
-    api_key = input("API Key (optional, press Enter to skip): ").strip()
+        choice = input("\nChoose [1/2/3]: ").strip()
+
+        if choice == "1":
+            api_url = CLOUD_URL
+        elif choice == "2":
+            api_url = LOCAL_URL
+        elif choice == "3":
+            api_url = input("Enter API URL: ").strip()
+        else:
+            print("Invalid choice")
+            return
+
+        # 2. Get credentials
+        tenant_id = input("\nTenant ID: ").strip()
+        api_key = input("API Key (optional, press Enter to skip): ").strip()
 
     # 3. Create .memgraph.env
     config_path = Path(CONFIG_FILE)
@@ -122,11 +138,23 @@ def init_project():
     print(f"✅ Created {skill_file}")
 
     # 5. Copy or reference MCP server
-    mcp_server_path = get_package_dir() / "examples" / "integrations" / "mcp_server.py"
-    if mcp_server_path.exists():
-        mcp_dest = skill_path / "mcp_server.py"
-        shutil.copy(mcp_server_path, mcp_dest)
-        print(f"✅ Copied MCP server to {mcp_dest}")
+    # Try multiple paths: installed package, dev checkout, bundled
+    mcp_candidates = [
+        get_package_dir() / "examples" / "integrations" / "mcp_server.py",
+        Path(__file__).parent / "mcp_server.py",
+        get_package_dir() / "integrations" / "mcp_server.py",
+    ]
+    mcp_copied = False
+    for mcp_server_path in mcp_candidates:
+        if mcp_server_path.exists():
+            mcp_dest = skill_path / "mcp_server.py"
+            shutil.copy(mcp_server_path, mcp_dest)
+            print(f"✅ Copied MCP server to {mcp_dest}")
+            mcp_copied = True
+            break
+
+    if not mcp_copied:
+        print("⚠️  MCP server template not found. You can create one manually.")
 
     # 6. Create MCP config hints
     print("\n📋 To enable MCP in your editor:")
@@ -274,7 +302,9 @@ Examples:
     subparsers = parser.add_subparsers(dest="command")
 
     # init
-    subparsers.add_parser("init", help="Initialize Memgraph in current project")
+    init_parser = subparsers.add_parser("init", help="Initialize Memgraph in current project")
+    init_parser.add_argument("--non-interactive", action="store_true",
+                             help="Non-interactive mode (reads from env vars: MEMGRAPH_API_URL, MEMGRAPH_TENANT_ID, MEMGRAPH_API_KEY)")
 
     # remember
     rem_parser = subparsers.add_parser("remember", help="Store a memory")
@@ -292,7 +322,7 @@ Examples:
     args = parser.parse_args()
 
     if args.command == "init":
-        init_project()
+        init_project(non_interactive=getattr(args, "non_interactive", False))
     elif args.command == "remember":
         remember_cmd(args.text, args.category)
     elif args.command == "recall":

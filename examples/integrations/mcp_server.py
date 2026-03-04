@@ -121,13 +121,12 @@ async def memgraph_remember(text: str, user_id: str, category: Optional[str] = N
         )
     """
     try:
-        metadata = {"category": category} if category else {}
-        result = memgraph.add(text=text, user_id=user_id, metadata=metadata)
+        result = memgraph.remember(text=text, user_id=user_id, category=category or "general")
 
         return {
             "success": True,
             "message": "Memory stored successfully",
-            "event_id": result.get("event_id"),
+            "belief_id": result.get("id"),
             "text": text,
             "user_id": user_id
         }
@@ -168,33 +167,20 @@ async def memgraph_search(query: str, user_id: str, limit: int = 5) -> Dict[str,
     try:
         context = memgraph.search(query=query, user_id=user_id)
 
-        # Extract and format results
-        beliefs = context.get("beliefs", [])[:limit]
-        memories = context.get("memories", [])[:limit]
+        # /v1/context returns { messages, retrieved_items, debug }
+        retrieved_items = context.get("retrieved_items", [])
 
         results = []
-
-        # Add beliefs (long-term facts)
-        for belief in beliefs:
-            if isinstance(belief, dict):
-                results.append({
-                    "type": "belief",
-                    "content": belief.get("value", belief.get("key", str(belief))),
-                    "confidence": belief.get("confidence_score", 1.0),
-                    "source": "long-term memory"
-                })
-
-        # Add memories (episodes)
-        for memory in memories:
-            if isinstance(memory, dict):
-                text = memory.get("text", memory.get("content", ""))
-                if isinstance(text, dict):
-                    text = text.get("text", str(text))
-                results.append({
-                    "type": "episode",
-                    "content": text,
-                    "source": "episodic memory"
-                })
+        for item in retrieved_items[:limit]:
+            if not isinstance(item, dict):
+                continue
+            results.append({
+                "type": item.get("type", "memory"),
+                "content": item.get("content", ""),
+                "score": item.get("score", 0),
+                "source": f"{item.get('type', 'memory')} memory",
+                "metadata": item.get("metadata", {}),
+            })
 
         return {
             "success": True,
@@ -290,14 +276,16 @@ async def memgraph_get_profile(user_id: str) -> Dict[str, Any]:
 
         headers = {"X-API-KEY": API_KEY}
 
-        # Get beliefs for this user
+        # GET /v1/beliefs/{subject_id}?tenant_id={tenant_id}
         response = requests.get(
-            f"{API_URL}/beliefs",
+            f"{API_URL}/beliefs/{user_id}",
             headers=headers,
-            params={"user_id": user_id}
+            params={"tenant_id": TENANT_ID}
         )
         response.raise_for_status()
         beliefs = response.json()
+        if not isinstance(beliefs, list):
+            beliefs = []
 
         profile = {
             "user_id": user_id,

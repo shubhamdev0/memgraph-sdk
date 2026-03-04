@@ -430,6 +430,74 @@ class MemgraphConversationMemory(BaseMemory):
 # Usage Examples
 # ============================================================================
 
+class MemgraphToolkit:
+    """LangChain toolkit providing search and remember as function-calling tools.
+
+    Compatible with create_openai_functions_agent and similar agents that use
+    structured tool definitions.
+
+    Example::
+
+        from langchain_openai import ChatOpenAI
+        from langchain.agents import AgentExecutor, create_openai_functions_agent
+
+        toolkit = MemgraphToolkit(api_key="mg_...", tenant_id="...", user_id="u1")
+        tools = toolkit.get_tools()
+        agent = create_openai_functions_agent(ChatOpenAI(model="gpt-4o"), tools, prompt)
+    """
+
+    def __init__(self, api_key: str, tenant_id: str, user_id: str, base_url: str = None):
+        base_url = base_url or os.getenv("MEMGRAPH_API_URL", "http://localhost:8001/v1")
+        self.client = MemgraphClient(api_key=api_key, tenant_id=tenant_id, base_url=base_url)
+        self.user_id = user_id
+
+    def _search(self, query: str) -> str:
+        """Search Memgraph for relevant memories and past context."""
+        result = self.client.search(query=query, user_id=self.user_id)
+        items = result.get("retrieved_items", result.get("beliefs", []))
+        if not items:
+            return "No relevant memories found."
+        lines = []
+        for it in items[:10]:
+            if isinstance(it, dict):
+                lines.append(f"- {it.get('content', it.get('value', it.get('text', str(it))))}")
+            else:
+                lines.append(f"- {it}")
+        return "\n".join(lines)
+
+    def _remember(self, text: str, category: str = "general") -> str:
+        """Store a fact or decision in Memgraph for future recall."""
+        self.client.remember(text, user_id=self.user_id, category=category)
+        return f"Remembered: {text[:100]}"
+
+    def get_tools(self):
+        """Return LangChain StructuredTool instances."""
+        from langchain.tools import StructuredTool
+        from pydantic import BaseModel as LCBaseModel, Field as LCField
+
+        class SearchInput(LCBaseModel):
+            query: str = LCField(description="The search query to find relevant memories")
+
+        class RememberInput(LCBaseModel):
+            text: str = LCField(description="The text/fact to remember")
+            category: str = LCField(default="general", description="Category: decision, architecture, bug_fix, preference, general")
+
+        return [
+            StructuredTool.from_function(
+                func=self._search,
+                name="memgraph_search",
+                description="Search persistent memory for relevant context, past decisions, and knowledge.",
+                args_schema=SearchInput,
+            ),
+            StructuredTool.from_function(
+                func=self._remember,
+                name="memgraph_remember",
+                description="Store a new fact or decision in persistent memory for future recall.",
+                args_schema=RememberInput,
+            ),
+        ]
+
+
 def example_basic_usage():
     """Example: Basic memory storage and retrieval"""
     from langchain_openai import ChatOpenAI
