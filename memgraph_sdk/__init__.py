@@ -4,10 +4,10 @@ __version__ = "0.3.0"
 
 from .client import MemgraphClient
 from .exceptions import (
-    MemgraphError,
     MemgraphAPIError,
     MemgraphAuthError,
     MemgraphConnectionError,
+    MemgraphError,
     MemgraphRateLimitError,
     MemgraphValidationError,
 )

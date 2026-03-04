@@ -23,8 +23,8 @@ Usage:
 
 import os
 import sys
-from typing import List, Dict, Any, Optional
 from datetime import datetime
+from typing import Any, Dict, List, Optional
 
 # OpenAI SDK
 try:

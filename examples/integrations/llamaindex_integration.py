@@ -14,7 +14,7 @@ Example:
 """
 
 import os
-from typing import Any, Dict, List, Optional
+from typing import List
 
 from memgraph_sdk import MemgraphClient
 
@@ -132,7 +132,6 @@ class MemgraphToolSpec:
 # --- Example Usage ---
 
 if __name__ == "__main__":
-    from llama_index.core import VectorStoreIndex, Settings
     from llama_index.core.query_engine import RetrieverQueryEngine
 
     # 1. As a retriever in a query engine

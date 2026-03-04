@@ -37,18 +37,16 @@ Setup:
 4. Restart Claude Desktop
 """
 
+import logging
 import os
 import sys
-import json
-import logging
-from typing import Any, Dict, List, Optional
-from datetime import datetime
+from typing import Any, Dict, Optional
 
 # MCP Protocol imports
 try:
+    from mcp import Tool
     from mcp.server import Server
     from mcp.server.stdio import stdio_server
-    from mcp import Tool
 except ImportError:
     print("Error: MCP library not installed. Install with: pip install mcp", file=sys.stderr)
     sys.exit(1)

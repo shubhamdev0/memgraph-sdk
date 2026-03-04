@@ -35,17 +35,17 @@ Usage Example:
 """
 
 import os
-from typing import Any, Dict, List, Optional
 from datetime import datetime
+from typing import Any, Dict, List, Optional
 
 # LangChain imports
 try:
-    from langchain_core.chat_history import BaseChatMessageHistory
-    from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, SystemMessage
-    from langchain_core.retrievers import BaseRetriever
-    from langchain_core.documents import Document
     from langchain_core.callbacks import CallbackManagerForRetrieverRun
+    from langchain_core.chat_history import BaseChatMessageHistory
+    from langchain_core.documents import Document
     from langchain_core.memory import BaseMemory
+    from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
+    from langchain_core.retrievers import BaseRetriever
 except ImportError:
     raise ImportError(
         "LangChain not installed. Install with: pip install langchain langchain-core"
@@ -473,7 +473,8 @@ class MemgraphToolkit:
     def get_tools(self):
         """Return LangChain StructuredTool instances."""
         from langchain.tools import StructuredTool
-        from pydantic import BaseModel as LCBaseModel, Field as LCField
+        from pydantic import BaseModel as LCBaseModel
+        from pydantic import Field as LCField
 
         class SearchInput(LCBaseModel):
             query: str = LCField(description="The search query to find relevant memories")
@@ -500,8 +501,8 @@ class MemgraphToolkit:
 
 def example_basic_usage():
     """Example: Basic memory storage and retrieval"""
-    from langchain_openai import ChatOpenAI
     from langchain.chains import ConversationChain
+    from langchain_openai import ChatOpenAI
 
     # Initialize memory
     memory = MemgraphConversationMemory(
@@ -552,8 +553,8 @@ def example_retrieval_qa():
 def example_agent_with_memory():
     """Example: Agent with persistent memory"""
     from langchain.agents import AgentExecutor, create_openai_functions_agent
-    from langchain_openai import ChatOpenAI
     from langchain.prompts import ChatPromptTemplate, MessagesPlaceholder
+    from langchain_openai import ChatOpenAI
 
     # Initialize memory
     memory = MemgraphMemory(

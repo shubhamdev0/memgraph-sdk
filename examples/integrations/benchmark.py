@@ -26,20 +26,20 @@ Usage:
     python benchmark.py --iterations 100 --output results.json
 """
 
+import argparse
+import json
 import os
+import statistics
 import sys
 import time
-import json
-import statistics
-from typing import List, Dict, Any, Tuple
+from dataclasses import asdict, dataclass
 from datetime import datetime
-from dataclasses import dataclass, asdict
-import argparse
+from typing import Any, Dict, List, Tuple
 
 # Dependencies
 try:
-    from openai import OpenAI
     import tiktoken
+    from openai import OpenAI
 except ImportError:
     print("Missing dependencies. Install with: pip install openai tiktoken")
     sys.exit(1)

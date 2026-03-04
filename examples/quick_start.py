@@ -20,6 +20,7 @@ Usage:
 
 import os
 import time
+
 from memgraph_sdk import MemgraphClient
 
 

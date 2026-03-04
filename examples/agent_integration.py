@@ -18,9 +18,11 @@ Usage:
 """
 
 import os
-from typing import List, Dict
-from memgraph_sdk import MemgraphClient
+from typing import Dict, List
+
 from openai import OpenAI
+
+from memgraph_sdk import MemgraphClient
 
 
 class MemoryEnabledAgent:
