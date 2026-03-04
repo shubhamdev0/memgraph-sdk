@@ -12,6 +12,8 @@ Usage:
         ctx = await client.search("What theme does the user prefer?", user_id="u1")
 """
 
+from __future__ import annotations
+
 import asyncio
 import logging
 import os
