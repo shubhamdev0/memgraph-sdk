@@ -10,7 +10,7 @@ It demonstrates:
 - Belief-aware responses
 
 Usage:
-    export MEMGRAPH_API_KEY=vel_your_key
+    export MEMGRAPH_API_KEY=mg_your_key
     export MEMGRAPH_TENANT_ID=your-tenant-id
     export OPENAI_API_KEY=sk-your-openai-key
 
@@ -18,11 +18,9 @@ Usage:
 """
 
 import os
-from typing import Dict, List
-
-from openai import OpenAI
-
+from typing import List, Dict
 from memgraph_sdk import MemgraphClient
+from openai import OpenAI
 
 
 class MemoryEnabledAgent:
@@ -202,7 +200,7 @@ def main():
     if not all([memgraph_key, tenant_id, openai_key]):
         print("\n❌ Missing required environment variables!")
         print("\nPlease set:")
-        print("  export MEMGRAPH_API_KEY=vel_your_key")
+        print("  export MEMGRAPH_API_KEY=mg_your_key")
         print("  export MEMGRAPH_TENANT_ID=your-tenant-id")
         print("  export OPENAI_API_KEY=sk-your-openai-key")
         return

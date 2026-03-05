@@ -19,27 +19,27 @@ Based on Mem0's benchmark methodology:
 - Mem0 claims: 90% lower token usage
 
 Usage:
-    export MEMGRAPH_API_KEY=vel_your_key
+    export MEMGRAPH_API_KEY=mg_your_key
     export MEMGRAPH_TENANT_ID=your-tenant-id
     export OPENAI_API_KEY=sk-your-key
 
     python benchmark.py --iterations 100 --output results.json
 """
 
-import argparse
-import json
 import os
-import statistics
 import sys
 import time
-from dataclasses import asdict, dataclass
+import json
+import statistics
+from typing import List, Dict, Any, Tuple
 from datetime import datetime
-from typing import Any, Dict, List, Tuple
+from dataclasses import dataclass, asdict
+import argparse
 
 # Dependencies
 try:
-    import tiktoken
     from openai import OpenAI
+    import tiktoken
 except ImportError:
     print("Missing dependencies. Install with: pip install openai tiktoken")
     sys.exit(1)
@@ -161,7 +161,7 @@ class MemgraphBenchmark:
             memgraph_tenant_id: Memgraph tenant ID
             memgraph_base_url: Memgraph API URL
         """
-        memgraph_base_url = memgraph_base_url or os.getenv("MEMGRAPH_API_URL", "http://localhost:8001/v1")
+        memgraph_base_url = memgraph_base_url or os.getenv("MEMGRAPH_API_URL", "https://api.memgraph.ai/v1")
         self.openai = OpenAI(api_key=openai_api_key)
         self.memgraph = MemgraphClient(
             api_key=memgraph_api_key,
@@ -526,7 +526,7 @@ def main():
         print("❌ Missing environment variables!")
         print("\nRequired:")
         print("  export OPENAI_API_KEY=sk-your-key")
-        print("  export MEMGRAPH_API_KEY=vel_your_key")
+        print("  export MEMGRAPH_API_KEY=mg_your_key")
         print("  export MEMGRAPH_TENANT_ID=your-tenant-id")
         sys.exit(1)
 

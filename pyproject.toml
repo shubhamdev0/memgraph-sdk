@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "memgraph-sdk"
 dynamic = ["version"]
-description = "Official Python SDK for Memgraph - the memory graph for AI agents"
+description = "Memory that thinks. The cognitive memory layer for AI agents — events, episodes, beliefs, and background dreaming."
 readme = "README.md"
 license = { file = "LICENSE" }
 authors = [
@@ -26,7 +26,7 @@ classifiers = [
     "Topic :: Software Development :: Libraries :: Python Modules",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
-keywords = ["memgraph", "ai", "memory", "agents", "llm", "rag", "context"]
+keywords = ["memgraph", "ai", "memory", "agents", "llm", "rag", "context", "cognitive", "beliefs", "mcp", "langchain", "openai"]
 dependencies = [
     "requests>=2.25.0",
     "pydantic>=2.0.0",
@@ -40,7 +40,8 @@ memgraph = "memgraph_sdk.cli:main"
 [project.optional-dependencies]
 async = ["httpx>=0.24.0"]
 cli = ["rich>=13.0.0"]
-all = ["httpx>=0.24.0", "rich>=13.0.0"]
+mcp = ["mcp>=1.0.0", "httpx>=0.24.0"]
+all = ["httpx>=0.24.0", "rich>=13.0.0", "mcp>=1.0.0"]
 dev = [
     "pytest>=7.0.0",
     "pytest-asyncio>=0.21.0",

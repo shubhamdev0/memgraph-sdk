@@ -1,13 +1,13 @@
 """Memgraph SDK - The official Python SDK for Memgraph, the memory graph for AI agents."""
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"
 
 from .client import MemgraphClient
 from .exceptions import (
+    MemgraphError,
     MemgraphAPIError,
     MemgraphAuthError,
     MemgraphConnectionError,
-    MemgraphError,
     MemgraphRateLimitError,
     MemgraphValidationError,
 )

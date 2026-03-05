@@ -15,9 +15,9 @@ Features:
 Setup:
 1. Install dependencies: pip install mcp anthropic-mcp requests
 2. Set environment variables:
-   export MEMGRAPH_API_URL=http://localhost:8001/v1
+   export MEMGRAPH_API_URL=https://api.memgraph.ai/v1
    export MEMGRAPH_TENANT_ID=your-tenant-id
-   export MEMGRAPH_API_KEY=vel_your_key
+   export MEMGRAPH_API_KEY=mg_your_key
 
 3. Add to Claude Desktop config (~/.config/claude/config.json):
    {
@@ -26,9 +26,9 @@ Setup:
          "command": "python3",
          "args": ["/path/to/mcp_server.py"],
          "env": {
-           "MEMGRAPH_API_URL": "http://localhost:8001/v1",
+           "MEMGRAPH_API_URL": "https://api.memgraph.ai/v1",
            "MEMGRAPH_TENANT_ID": "your-tenant-id",
-           "MEMGRAPH_API_KEY": "vel_your_key"
+           "MEMGRAPH_API_KEY": "mg_your_key"
          }
        }
      }
@@ -37,16 +37,18 @@ Setup:
 4. Restart Claude Desktop
 """
 
-import logging
 import os
 import sys
-from typing import Any, Dict, Optional
+import json
+import logging
+from typing import Any, Dict, List, Optional
+from datetime import datetime
 
 # MCP Protocol imports
 try:
-    from mcp import Tool
     from mcp.server import Server
     from mcp.server.stdio import stdio_server
+    from mcp import Tool
 except ImportError:
     print("Error: MCP library not installed. Install with: pip install mcp", file=sys.stderr)
     sys.exit(1)
@@ -67,7 +69,7 @@ logging.basicConfig(
 logger = logging.getLogger("memgraph-mcp")
 
 # Initialize Memgraph client from environment
-API_URL = os.getenv("MEMGRAPH_API_URL", "http://localhost:8001/v1")
+API_URL = os.getenv("MEMGRAPH_API_URL", "https://api.memgraph.ai/v1")
 TENANT_ID = os.getenv("MEMGRAPH_TENANT_ID")
 API_KEY = os.getenv("MEMGRAPH_API_KEY")
 

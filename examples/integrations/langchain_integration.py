@@ -20,8 +20,7 @@ Usage Example:
 
     # Initialize Memgraph memory
     memory = MemgraphMemory(
-        api_key="vel_your_key",
-        tenant_id="your-tenant-id",
+        api_key="mg_your_key",
         user_id="user123"
     )
 
@@ -35,17 +34,17 @@ Usage Example:
 """
 
 import os
-from datetime import datetime
 from typing import Any, Dict, List, Optional
+from datetime import datetime
 
 # LangChain imports
 try:
-    from langchain_core.callbacks import CallbackManagerForRetrieverRun
     from langchain_core.chat_history import BaseChatMessageHistory
-    from langchain_core.documents import Document
-    from langchain_core.memory import BaseMemory
-    from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
+    from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, SystemMessage
     from langchain_core.retrievers import BaseRetriever
+    from langchain_core.documents import Document
+    from langchain_core.callbacks import CallbackManagerForRetrieverRun
+    from langchain_core.memory import BaseMemory
 except ImportError:
     raise ImportError(
         "LangChain not installed. Install with: pip install langchain langchain-core"
@@ -73,8 +72,7 @@ class MemgraphMemory(BaseChatMessageHistory):
 
     Example:
         memory = MemgraphMemory(
-            api_key="vel_your_key",
-            tenant_id="tenant_id",
+            api_key="mg_your_key",
             user_id="user123",
             session_id="session_abc"
         )
@@ -90,8 +88,8 @@ class MemgraphMemory(BaseChatMessageHistory):
     def __init__(
         self,
         api_key: str,
-        tenant_id: str,
         user_id: str,
+        tenant_id: Optional[str] = None,
         session_id: Optional[str] = None,
         base_url: str = None
     ):
@@ -99,13 +97,12 @@ class MemgraphMemory(BaseChatMessageHistory):
         Initialize Memgraph memory.
 
         Args:
-            api_key: Memgraph API key (starts with 'vel_')
-            tenant_id: Tenant identifier
+            api_key: Memgraph API key (starts with 'mg_')
             user_id: User identifier
+            tenant_id: Tenant identifier (optional — resolved from API key if omitted)
             session_id: Optional session identifier (defaults to user_id)
-            base_url: Memgraph API URL
+            base_url: Memgraph API URL (defaults to MEMGRAPH_API_URL env or cloud)
         """
-        base_url = base_url or os.getenv("MEMGRAPH_API_URL", "http://localhost:8001/v1")
         self.client = MemgraphClient(
             api_key=api_key,
             tenant_id=tenant_id,
@@ -208,8 +205,7 @@ class MemgraphRetriever(BaseRetriever):
 
     Example:
         retriever = MemgraphRetriever(
-            api_key="vel_your_key",
-            tenant_id="tenant_id",
+            api_key="mg_your_key",
             user_id="user123",
             k=5
         )
@@ -229,8 +225,8 @@ class MemgraphRetriever(BaseRetriever):
     def __init__(
         self,
         api_key: str,
-        tenant_id: str,
         user_id: str,
+        tenant_id: Optional[str] = None,
         k: int = 5,
         base_url: str = None,
         search_kwargs: Optional[Dict[str, Any]] = None
@@ -240,14 +236,13 @@ class MemgraphRetriever(BaseRetriever):
 
         Args:
             api_key: Memgraph API key
-            tenant_id: Tenant identifier
             user_id: User identifier
+            tenant_id: Tenant identifier (optional — resolved from API key if omitted)
             k: Number of documents to retrieve (default: 5)
-            base_url: Memgraph API URL
+            base_url: Memgraph API URL (defaults to MEMGRAPH_API_URL env or cloud)
             search_kwargs: Additional search parameters
         """
         super().__init__()
-        base_url = base_url or os.getenv("MEMGRAPH_API_URL", "http://localhost:8001/v1")
         self.client = MemgraphClient(
             api_key=api_key,
             tenant_id=tenant_id,
@@ -343,8 +338,7 @@ class MemgraphConversationMemory(BaseMemory):
         from langchain_openai import ChatOpenAI
 
         memory = MemgraphConversationMemory(
-            api_key="vel_your_key",
-            tenant_id="tenant_id",
+            api_key="mg_your_key",
             user_id="user123"
         )
 
@@ -361,8 +355,8 @@ class MemgraphConversationMemory(BaseMemory):
     def __init__(
         self,
         api_key: str,
-        tenant_id: str,
         user_id: str,
+        tenant_id: Optional[str] = None,
         memory_key: str = "history",
         base_url: str = None
     ):
@@ -371,17 +365,16 @@ class MemgraphConversationMemory(BaseMemory):
 
         Args:
             api_key: Memgraph API key
-            tenant_id: Tenant identifier
             user_id: User identifier
+            tenant_id: Tenant identifier (optional — resolved from API key if omitted)
             memory_key: Key to use for storing memory in chain context
-            base_url: Memgraph API URL
+            base_url: Memgraph API URL (defaults to MEMGRAPH_API_URL env or cloud)
         """
         super().__init__()
-        base_url = base_url or os.getenv("MEMGRAPH_API_URL", "http://localhost:8001/v1")
         self.chat_memory = MemgraphMemory(
             api_key=api_key,
-            tenant_id=tenant_id,
             user_id=user_id,
+            tenant_id=tenant_id,
             base_url=base_url
         )
         self.memory_key = memory_key
@@ -446,8 +439,7 @@ class MemgraphToolkit:
         agent = create_openai_functions_agent(ChatOpenAI(model="gpt-4o"), tools, prompt)
     """
 
-    def __init__(self, api_key: str, tenant_id: str, user_id: str, base_url: str = None):
-        base_url = base_url or os.getenv("MEMGRAPH_API_URL", "http://localhost:8001/v1")
+    def __init__(self, api_key: str, user_id: str, tenant_id: str = None, base_url: str = None):
         self.client = MemgraphClient(api_key=api_key, tenant_id=tenant_id, base_url=base_url)
         self.user_id = user_id
 
@@ -473,8 +465,7 @@ class MemgraphToolkit:
     def get_tools(self):
         """Return LangChain StructuredTool instances."""
         from langchain.tools import StructuredTool
-        from pydantic import BaseModel as LCBaseModel
-        from pydantic import Field as LCField
+        from pydantic import BaseModel as LCBaseModel, Field as LCField
 
         class SearchInput(LCBaseModel):
             query: str = LCField(description="The search query to find relevant memories")
@@ -501,8 +492,8 @@ class MemgraphToolkit:
 
 def example_basic_usage():
     """Example: Basic memory storage and retrieval"""
-    from langchain.chains import ConversationChain
     from langchain_openai import ChatOpenAI
+    from langchain.chains import ConversationChain
 
     # Initialize memory
     memory = MemgraphConversationMemory(
@@ -553,8 +544,8 @@ def example_retrieval_qa():
 def example_agent_with_memory():
     """Example: Agent with persistent memory"""
     from langchain.agents import AgentExecutor, create_openai_functions_agent
-    from langchain.prompts import ChatPromptTemplate, MessagesPlaceholder
     from langchain_openai import ChatOpenAI
+    from langchain.prompts import ChatPromptTemplate, MessagesPlaceholder
 
     # Initialize memory
     memory = MemgraphMemory(
@@ -589,5 +580,4 @@ if __name__ == "__main__":
     print("2. example_retrieval_qa() - QA with semantic search")
     print("3. example_agent_with_memory() - Agent with persistent memory")
     print("\nMake sure to set environment variables:")
-    print("  export MEMGRAPH_API_KEY=vel_your_key")
-    print("  export MEMGRAPH_TENANT_ID=your-tenant-id")
+    print("  export MEMGRAPH_API_KEY=mg_your_key")

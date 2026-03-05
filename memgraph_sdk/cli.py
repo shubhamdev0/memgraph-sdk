@@ -253,7 +253,9 @@ def status_cmd():
 
     if requests:
         try:
-            resp = requests.get(f"{config['api_url']}/health", timeout=5)
+            # Health endpoint is at /health, not /v1/health
+            base_url = config['api_url'].rsplit('/v1', 1)[0]
+            resp = requests.get(f"{base_url}/health", timeout=5)
             if resp.status_code == 200:
                 print("\n✅ Server is reachable")
             else:
@@ -286,13 +288,148 @@ def load_config():
     }
 
 
+def setup_cmd(api_key: str):
+    """One-command setup: validate key, detect IDE, configure MCP."""
+    if not requests:
+        print("Error: 'requests' package not installed. Run: pip install requests")
+        return
+
+    api_url = os.getenv("MEMGRAPH_API_URL", CLOUD_URL)
+
+    # 1. Validate API key via /v1/auth/whoami
+    print("Connecting to Memgraph...")
+    try:
+        resp = requests.get(
+            f"{api_url}/auth/whoami",
+            headers={"X-API-KEY": api_key},
+            timeout=10,
+        )
+        if resp.status_code == 200:
+            data = resp.json()
+            tenant_id = data.get("tenant_id", "")
+            tenant_name = data.get("tenant_name", "Unknown")
+            print(f"  Connected to {api_url}")
+            print(f"  Tenant: {tenant_name} ({tenant_id})")
+        elif resp.status_code in (401, 403):
+            print(f"  Invalid API key. Check your key and try again.")
+            return
+        else:
+            # Fallback: try health check, use key without whoami
+            tenant_id = os.getenv("MEMGRAPH_TENANT_ID", "")
+            tenant_name = ""
+            print(f"  Connected (whoami not available, using provided config)")
+    except requests.ConnectionError:
+        print(f"  Cannot connect to {api_url}")
+        return
+
+    # 2. Save config
+    config_path = Path(CONFIG_FILE)
+    with open(config_path, "w") as f:
+        f.write(f"MEMGRAPH_API_URL={api_url}\n")
+        if tenant_id:
+            f.write(f"MEMGRAPH_TENANT_ID={tenant_id}\n")
+        f.write(f"MEMGRAPH_API_KEY={api_key}\n")
+    print(f"  Config saved to {CONFIG_FILE}")
+
+    # 3. Auto-detect IDE and write MCP config
+    mcp_server_cmd = "python3 -m memgraph_sdk.mcp"
+    mcp_env = {
+        "MEMGRAPH_API_KEY": api_key,
+    }
+    if api_url != CLOUD_URL:
+        mcp_env["MEMGRAPH_API_URL"] = api_url
+    if tenant_id:
+        mcp_env["MEMGRAPH_TENANT_ID"] = tenant_id
+
+    import json as _json
+
+    mcp_config_entry = {
+        "memgraph": {
+            "command": "python3",
+            "args": ["-m", "memgraph_sdk.mcp"],
+            "env": mcp_env,
+        }
+    }
+
+    ide_configured = False
+    home = Path.home()
+
+    # Cursor IDE
+    cursor_dir = home / ".cursor"
+    if cursor_dir.exists():
+        mcp_json_path = cursor_dir / "mcp.json"
+        _write_mcp_config(mcp_json_path, mcp_config_entry)
+        print(f"  Cursor MCP config written to {mcp_json_path}")
+        ide_configured = True
+
+    # Claude Desktop (macOS)
+    claude_config_dir = home / "Library" / "Application Support" / "Claude"
+    if claude_config_dir.exists():
+        claude_config_path = claude_config_dir / "claude_desktop_config.json"
+        _write_mcp_config(claude_config_path, mcp_config_entry)
+        print(f"  Claude Desktop config written to {claude_config_path}")
+        ide_configured = True
+
+    # Claude Code
+    claude_code_dir = home / ".claude"
+    if claude_code_dir.exists():
+        # For Claude Code, MCP is configured via project-level settings
+        print("  Claude Code detected (configure MCP in project settings)")
+        ide_configured = True
+
+    if not ide_configured:
+        print("\n  No IDE detected. Add this to your MCP config manually:")
+        print(_json.dumps({"mcpServers": mcp_config_entry}, indent=2))
+
+    # 4. Create skill directory
+    skill_path = Path(SKILL_DIR)
+    skill_path.mkdir(parents=True, exist_ok=True)
+    skill_file = skill_path / "SKILL.md"
+    with open(skill_file, "w") as f:
+        f.write(SKILL_TEMPLATE)
+
+    # 5. Test connection
+    try:
+        base_url = api_url.rsplit("/v1", 1)[0]
+        resp = requests.get(f"{base_url}/health", timeout=5)
+        if resp.status_code == 200:
+            print("\n  Server is reachable")
+        else:
+            print(f"\n  Server returned: {resp.status_code}")
+    except requests.ConnectionError:
+        print("\n  Warning: Server health check failed (may still work)")
+
+    print("\n  Ready! Your AI assistant now has persistent memory.")
+
+
+def _write_mcp_config(path: Path, entry: dict):
+    """Merge MCP config entry into existing config file (or create new)."""
+    import json as _json
+    existing = {}
+    if path.exists():
+        try:
+            with open(path) as f:
+                existing = _json.load(f)
+        except (ValueError, _json.JSONDecodeError):
+            existing = {}
+
+    if "mcpServers" not in existing:
+        existing["mcpServers"] = {}
+    existing["mcpServers"].update(entry)
+
+    with open(path, "w") as f:
+        _json.dump(existing, f, indent=2)
+        f.write("\n")
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Memgraph - AI Agent Memory Graph",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  memgraph init                    # Set up Memgraph in current project
+  memgraph setup --key mg_abc123   # One-command setup (recommended)
+  memgraph init                    # Interactive setup
   memgraph remember "Used JWT"     # Store a memory
   memgraph recall "authentication" # Search memories
   memgraph status                  # Check connection
@@ -301,10 +438,15 @@ Examples:
 
     subparsers = parser.add_subparsers(dest="command")
 
-    # init
-    init_parser = subparsers.add_parser("init", help="Initialize Memgraph in current project")
+    # setup (new, recommended)
+    setup_parser = subparsers.add_parser("setup", help="One-command setup (recommended)")
+    setup_parser.add_argument("--key", "-k", required=False,
+                              help="API key (or set MEMGRAPH_API_KEY env var)")
+
+    # init (legacy, interactive)
+    init_parser = subparsers.add_parser("init", help="Interactive setup")
     init_parser.add_argument("--non-interactive", action="store_true",
-                             help="Non-interactive mode (reads from env vars: MEMGRAPH_API_URL, MEMGRAPH_TENANT_ID, MEMGRAPH_API_KEY)")
+                             help="Non-interactive mode (reads from env vars)")
 
     # remember
     rem_parser = subparsers.add_parser("remember", help="Store a memory")
@@ -321,7 +463,14 @@ Examples:
 
     args = parser.parse_args()
 
-    if args.command == "init":
+    if args.command == "setup":
+        key = getattr(args, "key", None) or os.getenv("MEMGRAPH_API_KEY")
+        if not key:
+            print("Error: API key required. Use --key or set MEMGRAPH_API_KEY env var.")
+            print("Get your key at https://memgraph.ai")
+            return
+        setup_cmd(key)
+    elif args.command == "init":
         init_project(non_interactive=getattr(args, "non_interactive", False))
     elif args.command == "remember":
         remember_cmd(args.text, args.category)

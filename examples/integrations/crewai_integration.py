@@ -21,7 +21,7 @@ Example:
 """
 
 import os
-from typing import Optional, Type
+from typing import Any, Optional, Type
 
 from pydantic import BaseModel, Field
 
@@ -31,6 +31,7 @@ except ImportError:
     raise ImportError("crewai-tools is required. Install with: pip install crewai-tools")
 
 from memgraph_sdk import MemgraphClient
+
 
 # --- Tool Input Schemas ---
 
@@ -117,7 +118,7 @@ class MemgraphRememberTool(BaseTool):
 # --- Example Usage ---
 
 if __name__ == "__main__":
-    from crewai import Agent, Crew, Process, Task
+    from crewai import Agent, Task, Crew, Process
 
     # Create tools
     search = MemgraphSearchTool(

@@ -14,7 +14,7 @@ Installation:
     pip install openai memgraph-sdk
 
 Usage:
-    export MEMGRAPH_API_KEY=vel_your_key
+    export MEMGRAPH_API_KEY=mg_your_key
     export MEMGRAPH_TENANT_ID=your-tenant-id
     export OPENAI_API_KEY=sk-your-openai-key
 
@@ -23,8 +23,8 @@ Usage:
 
 import os
 import sys
+from typing import List, Dict, Any, Optional
 from datetime import datetime
-from typing import Any, Dict, List, Optional
 
 # OpenAI SDK
 try:
@@ -58,8 +58,7 @@ class MemgraphOpenAIAgent:
     Example:
         agent = MemgraphOpenAIAgent(
             openai_api_key="sk-...",
-            memgraph_api_key="vel_...",
-            memgraph_tenant_id="tenant-id",
+            memgraph_api_key="mg_...",
             user_id="user123"
         )
 
@@ -71,8 +70,8 @@ class MemgraphOpenAIAgent:
         self,
         openai_api_key: str,
         memgraph_api_key: str,
-        memgraph_tenant_id: str,
         user_id: str,
+        memgraph_tenant_id: str = None,
         model: str = "gpt-4",
         memgraph_base_url: str = None
     ):
@@ -82,12 +81,11 @@ class MemgraphOpenAIAgent:
         Args:
             openai_api_key: OpenAI API key
             memgraph_api_key: Memgraph API key
-            memgraph_tenant_id: Memgraph tenant ID
             user_id: User identifier
+            memgraph_tenant_id: Memgraph tenant ID (optional — resolved from API key)
             model: OpenAI model to use (default: gpt-4)
-            memgraph_base_url: Memgraph API URL
+            memgraph_base_url: Memgraph API URL (defaults to cloud)
         """
-        memgraph_base_url = memgraph_base_url or os.getenv("MEMGRAPH_API_URL", "http://localhost:8001/v1")
         self.openai = OpenAI(api_key=openai_api_key)
         self.memgraph = MemgraphClient(
             api_key=memgraph_api_key,
@@ -309,8 +307,7 @@ class MemgraphOpenAIAssistant:
     Example:
         assistant = MemgraphOpenAIAssistant(
             openai_api_key="sk-...",
-            memgraph_api_key="vel_...",
-            memgraph_tenant_id="tenant-id",
+            memgraph_api_key="mg_...",
             assistant_id="asst_...",
             user_id="user123"
         )
@@ -322,9 +319,9 @@ class MemgraphOpenAIAssistant:
         self,
         openai_api_key: str,
         memgraph_api_key: str,
-        memgraph_tenant_id: str,
         assistant_id: str,
         user_id: str,
+        memgraph_tenant_id: str = None,
         memgraph_base_url: str = None
     ):
         """
@@ -333,12 +330,11 @@ class MemgraphOpenAIAssistant:
         Args:
             openai_api_key: OpenAI API key
             memgraph_api_key: Memgraph API key
-            memgraph_tenant_id: Memgraph tenant ID
             assistant_id: OpenAI Assistant ID
             user_id: User identifier
-            memgraph_base_url: Memgraph API URL
+            memgraph_tenant_id: Memgraph tenant ID (optional — resolved from API key)
+            memgraph_base_url: Memgraph API URL (defaults to cloud)
         """
-        memgraph_base_url = memgraph_base_url or os.getenv("MEMGRAPH_API_URL", "http://localhost:8001/v1")
         self.openai = OpenAI(api_key=openai_api_key)
         self.memgraph = MemgraphClient(
             api_key=memgraph_api_key,
@@ -425,7 +421,6 @@ def example_basic_chat():
     agent = MemgraphOpenAIAgent(
         openai_api_key=os.getenv("OPENAI_API_KEY"),
         memgraph_api_key=os.getenv("MEMGRAPH_API_KEY"),
-        memgraph_tenant_id=os.getenv("MEMGRAPH_TENANT_ID"),
         user_id="demo_user_openai"
     )
 
@@ -446,7 +441,6 @@ def example_function_calling():
     agent = MemgraphOpenAIAgent(
         openai_api_key=os.getenv("OPENAI_API_KEY"),
         memgraph_api_key=os.getenv("MEMGRAPH_API_KEY"),
-        memgraph_tenant_id=os.getenv("MEMGRAPH_TENANT_ID"),
         user_id="demo_user_functions"
     )
 
@@ -486,7 +480,6 @@ def example_streaming_response():
     agent = MemgraphOpenAIAgent(
         openai_api_key=os.getenv("OPENAI_API_KEY"),
         memgraph_api_key=os.getenv("MEMGRAPH_API_KEY"),
-        memgraph_tenant_id=os.getenv("MEMGRAPH_TENANT_ID"),
         user_id="demo_user_streaming"
     )
 
@@ -530,13 +523,11 @@ def main():
     if not all([
         os.getenv("OPENAI_API_KEY"),
         os.getenv("MEMGRAPH_API_KEY"),
-        os.getenv("MEMGRAPH_TENANT_ID")
     ]):
         print("\n❌ Missing required environment variables!")
         print("\nPlease set:")
         print("  export OPENAI_API_KEY=sk-your-key")
-        print("  export MEMGRAPH_API_KEY=vel_your_key")
-        print("  export MEMGRAPH_TENANT_ID=your-tenant-id")
+        print("  export MEMGRAPH_API_KEY=mg_your_key")
         return
 
     # Run basic example

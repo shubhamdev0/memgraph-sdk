@@ -3,7 +3,7 @@ import time
 
 from memgraph_sdk import MemgraphClient
 
-API_KEY = os.getenv("MEMGRAPH_API_KEY", "vel_test_sdk")
+API_KEY = os.getenv("MEMGRAPH_API_KEY", "mg_test_sdk")
 TENANT_ID = os.getenv("MEMGRAPH_TENANT_ID", "demo-tenant")
 
 def main():

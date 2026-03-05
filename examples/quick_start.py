@@ -13,14 +13,13 @@ Run this after:
 3. Getting your API key from Settings
 
 Usage:
-    export MEMGRAPH_API_KEY=vel_your_key_here
+    export MEMGRAPH_API_KEY=mg_your_key_here
     export MEMGRAPH_TENANT_ID=your-tenant-uuid
     python examples/quick_start.py
 """
 
 import os
 import time
-
 from memgraph_sdk import MemgraphClient
 
 
@@ -41,7 +40,7 @@ def main():
     if not api_key or not tenant_id:
         print("❌ Error: Missing credentials!")
         print("\nPlease set environment variables:")
-        print("  export MEMGRAPH_API_KEY=vel_your_key")
+        print("  export MEMGRAPH_API_KEY=mg_your_key")
         print("  export MEMGRAPH_TENANT_ID=your-tenant-id")
         print(f"\nGet these from: {STUDIO_URL}/studio/settings")
         return
@@ -50,7 +49,7 @@ def main():
         client = MemgraphClient(
             api_key=api_key,
             tenant_id=tenant_id,
-            base_url=os.getenv("MEMGRAPH_API_URL", "http://localhost:8001/v1")
+            base_url=os.getenv("MEMGRAPH_API_URL", "https://api.memgraph.ai/v1")
         )
         print("✅ Client initialized successfully!")
         print(f"   Connected to: {client.base_url}")

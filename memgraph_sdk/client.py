@@ -1,6 +1,6 @@
-import logging
 import os
 import time
+import logging
 from typing import Any, Dict, List, Optional
 
 import requests
@@ -20,14 +20,14 @@ class MemgraphClient:
     def __init__(
         self,
         api_key: str,
-        tenant_id: str,
+        tenant_id: str = None,
         base_url: str = None,
         timeout: float = 30.0,
         max_retries: int = 3,
     ):
         self.api_key = api_key
         self.tenant_id = tenant_id
-        self.base_url = base_url or os.getenv("MEMGRAPH_API_URL", "http://localhost:8001/v1")
+        self.base_url = base_url or os.getenv("MEMGRAPH_API_URL", "https://api.memgraph.ai/v1")
         self.timeout = timeout
         self.max_retries = max_retries
         self.headers = {"X-API-KEY": api_key}
@@ -120,10 +120,11 @@ class MemgraphClient:
         For immediate searchability, use remember() instead.
         """
         data = {
-            "tenant_id": self.tenant_id,
             "user_id": user_id,
             "text": text,
         }
+        if self.tenant_id is not None:
+            data["tenant_id"] = self.tenant_id
         resp = self._request("POST", "/ingest", data=data)
         return resp.json()
 
@@ -139,7 +140,6 @@ class MemgraphClient:
         belief_key = f"{category}_{'_'.join(clean.split()[:6])}"
 
         payload = {
-            "tenant_id": self.tenant_id,
             "subject_id": user_id,
             "key": belief_key,
             "value": text,
@@ -147,6 +147,8 @@ class MemgraphClient:
             "belief_type": "fact" if category in ("bug_fix", "architecture") else "belief",
             "domain": domain or domain_map.get(category, "general"),
         }
+        if self.tenant_id is not None:
+            payload["tenant_id"] = self.tenant_id
         resp = self._request("POST", "/beliefs", json=payload)
         return resp.json()
 
@@ -155,19 +157,21 @@ class MemgraphClient:
         payload = {
             "task": query,
             "user_id": user_id,
-            "tenant_id": self.tenant_id,
             "agent_id": agent_id,
         }
+        if self.tenant_id is not None:
+            payload["tenant_id"] = self.tenant_id
         resp = self._request("POST", "/context", json=payload)
         return resp.json()
 
     def get_beliefs(self, user_id: str, limit: int = 50, cursor: str = None) -> Dict:
         """Fetch beliefs for a user with cursor-based pagination."""
         params = {
-            "tenant_id": self.tenant_id,
             "subject_id": user_id,
             "limit": limit,
         }
+        if self.tenant_id is not None:
+            params["tenant_id"] = self.tenant_id
         if cursor:
             params["cursor"] = cursor
         resp = self._request("GET", "/beliefs", params=params)

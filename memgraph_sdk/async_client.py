@@ -7,7 +7,7 @@ Uses httpx for non-blocking HTTP calls, suitable for async frameworks
 Usage:
     from memgraph_sdk import AsyncMemgraphClient
 
-    async with AsyncMemgraphClient(api_key="...", tenant_id="...") as client:
+    async with AsyncMemgraphClient(api_key="...") as client:
         await client.add("User prefers dark mode", user_id="u1")
         ctx = await client.search("What theme does the user prefer?", user_id="u1")
 """
@@ -39,7 +39,7 @@ class AsyncMemgraphClient:
     def __init__(
         self,
         api_key: str,
-        tenant_id: str,
+        tenant_id: str = None,
         base_url: str = None,
         timeout: float = 30.0,
         max_retries: int = 3,
@@ -50,7 +50,7 @@ class AsyncMemgraphClient:
             )
         self.api_key = api_key
         self.tenant_id = tenant_id
-        self.base_url = base_url or os.getenv("MEMGRAPH_API_URL", "http://localhost:8001/v1")
+        self.base_url = base_url or os.getenv("MEMGRAPH_API_URL", "https://api.memgraph.ai/v1")
         self.max_retries = max_retries
         self._client = httpx.AsyncClient(
             base_url=self.base_url,
@@ -145,10 +145,11 @@ class AsyncMemgraphClient:
     async def add(self, text: str, user_id: str, metadata: Optional[Dict] = None) -> Dict:
         """Add a memory via the /ingest endpoint (event pipeline)."""
         data = {
-            "tenant_id": self.tenant_id,
             "user_id": user_id,
             "text": text,
         }
+        if self.tenant_id is not None:
+            data["tenant_id"] = self.tenant_id
         resp = await self._request("POST", "/ingest", data=data)
         return resp.json()
 
@@ -164,7 +165,6 @@ class AsyncMemgraphClient:
         belief_key = f"{category}_{'_'.join(clean.split()[:6])}"
 
         payload = {
-            "tenant_id": self.tenant_id,
             "subject_id": user_id,
             "key": belief_key,
             "value": text,
@@ -172,6 +172,8 @@ class AsyncMemgraphClient:
             "belief_type": "fact" if category in ("bug_fix", "architecture") else "belief",
             "domain": domain or domain_map.get(category, "general"),
         }
+        if self.tenant_id is not None:
+            payload["tenant_id"] = self.tenant_id
         resp = await self._request("POST", "/beliefs", json=payload)
         return resp.json()
 
@@ -180,9 +182,10 @@ class AsyncMemgraphClient:
         payload = {
             "task": query,
             "user_id": user_id,
-            "tenant_id": self.tenant_id,
             "agent_id": agent_id,
         }
+        if self.tenant_id is not None:
+            payload["tenant_id"] = self.tenant_id
         resp = await self._request("POST", "/context", json=payload)
         return resp.json()
 
@@ -200,12 +203,13 @@ class AsyncMemgraphClient:
     ) -> Dict:
         """Log a raw event to the /events endpoint."""
         payload = {
-            "tenant_id": self.tenant_id,
             "user_id": user_id,
             "agent_id": agent_id,
             "event_type": event_type,
             "content": content,
         }
+        if self.tenant_id is not None:
+            payload["tenant_id"] = self.tenant_id
         if thread_id:
             payload["thread_id"] = thread_id
         resp = await self._request("POST", "/events", json=payload)
@@ -214,10 +218,11 @@ class AsyncMemgraphClient:
     async def get_beliefs(self, user_id: str, limit: int = 50, cursor: str = None) -> Dict:
         """Fetch beliefs for a user with cursor-based pagination."""
         params = {
-            "tenant_id": self.tenant_id,
             "subject_id": user_id,
             "limit": limit,
         }
+        if self.tenant_id is not None:
+            params["tenant_id"] = self.tenant_id
         if cursor:
             params["cursor"] = cursor
         resp = await self._request("GET", "/beliefs", params=params)
