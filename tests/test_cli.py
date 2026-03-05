@@ -1,9 +1,9 @@
 """Tests for the Memgraph CLI commands."""
-import unittest
-from unittest.mock import patch, MagicMock
 import os
 import tempfile
+import unittest
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 
 class TestCliStatusUrl(unittest.TestCase):
@@ -234,7 +234,7 @@ class TestCliCloudVsOnPremURL(unittest.TestCase):
 
     def test_init_cloud_default(self):
         """Non-interactive init with no MEMGRAPH_API_URL defaults to cloud."""
-        from memgraph_sdk.cli import init_project, CLOUD_URL
+        from memgraph_sdk.cli import CLOUD_URL, init_project
 
         with tempfile.TemporaryDirectory() as tmpdir:
             orig_dir = os.getcwd()
@@ -273,7 +273,7 @@ class TestCliCloudVsOnPremURL(unittest.TestCase):
 
     def test_setup_cloud_default(self):
         """setup_cmd without MEMGRAPH_API_URL defaults to cloud."""
-        from memgraph_sdk.cli import setup_cmd, CLOUD_URL
+        from memgraph_sdk.cli import CLOUD_URL, setup_cmd
 
         with tempfile.TemporaryDirectory() as tmpdir:
             orig_dir = os.getcwd()
@@ -341,16 +341,12 @@ class TestCliCloudVsOnPremURL(unittest.TestCase):
 
     def test_setup_mcp_config_cloud_omits_api_url(self):
         """For cloud setup, MCP config should NOT include MEMGRAPH_API_URL env (SDK defaults)."""
-        from memgraph_sdk.cli import setup_cmd, CLOUD_URL
+        from memgraph_sdk.cli import setup_cmd
 
         with tempfile.TemporaryDirectory() as tmpdir:
             orig_dir = os.getcwd()
             try:
                 os.chdir(tmpdir)
-                # Create a fake .cursor dir so IDE detection triggers
-                cursor_dir = Path.home() / ".cursor"
-                cursor_existed = cursor_dir.exists()
-
                 with patch.dict(os.environ, {}, clear=False):
                     os.environ.pop("MEMGRAPH_API_URL", None)
                     with patch("memgraph_sdk.cli.requests") as mock_requests:
@@ -376,7 +372,7 @@ class TestCliCloudVsOnPremURL(unittest.TestCase):
 
     def test_setup_mcp_config_onprem_includes_api_url(self):
         """For on-prem setup, MCP config SHOULD include MEMGRAPH_API_URL env."""
-        from memgraph_sdk.cli import setup_cmd, CLOUD_URL
+        from memgraph_sdk.cli import setup_cmd
 
         with tempfile.TemporaryDirectory() as tmpdir:
             orig_dir = os.getcwd()

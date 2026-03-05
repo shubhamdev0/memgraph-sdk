@@ -1,9 +1,15 @@
 """Tests for the MCP server module."""
-import unittest
-from unittest.mock import patch, MagicMock, AsyncMock
+import asyncio
 import os
 import sys
-import asyncio
+import unittest
+from unittest.mock import patch
+
+try:
+    import mcp  # noqa: F401
+    HAS_MCP = True
+except ImportError:
+    HAS_MCP = False
 
 
 def _run(coro):
@@ -11,6 +17,7 @@ def _run(coro):
     return asyncio.get_event_loop().run_until_complete(coro)
 
 
+@unittest.skipUnless(HAS_MCP, "mcp library not installed (pip install 'memgraph-sdk[mcp]')")
 class TestMCPServerModule(unittest.TestCase):
     """Test MCP server can be imported and configured correctly."""
 
@@ -90,6 +97,7 @@ class TestMCPServerModule(unittest.TestCase):
                 del sys.modules["memgraph_sdk.mcp"]
 
 
+@unittest.skipUnless(HAS_MCP, "mcp library not installed (pip install 'memgraph-sdk[mcp]')")
 class TestMCPToolHandlers(unittest.TestCase):
     """Test MCP tool handler implementations."""
 
@@ -211,6 +219,7 @@ class TestMCPToolHandlers(unittest.TestCase):
 # ======================================================================
 
 
+@unittest.skipUnless(HAS_MCP, "mcp library not installed (pip install 'memgraph-sdk[mcp]')")
 class TestMCPCloudVsOnPremURL(unittest.TestCase):
     """Verify MCP server URL resolution works for both cloud and on-prem."""
 

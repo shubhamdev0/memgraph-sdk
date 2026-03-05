@@ -1,12 +1,11 @@
 """Unit tests for MemgraphClient."""
 import unittest
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 from memgraph_sdk import MemgraphClient, __version__
 from memgraph_sdk.exceptions import (
     MemgraphAPIError,
     MemgraphAuthError,
-    MemgraphConnectionError,
     MemgraphRateLimitError,
     MemgraphValidationError,
 )
@@ -134,14 +133,14 @@ class TestClientMethods(unittest.TestCase):
     def test_health(self):
         client = self._make_client()
         mock_resp = self._mock_response({"status": "healthy"})
-        with patch.object(client._session, "request", return_value=mock_resp) as mock_req:
+        with patch.object(client._session, "request", return_value=mock_resp):
             result = client.health()
             assert result == {"status": "healthy"}
 
     def test_contradictions(self):
         client = self._make_client()
         mock_resp = self._mock_response({"contradictions": []})
-        with patch.object(client._session, "request", return_value=mock_resp) as mock_req:
+        with patch.object(client._session, "request", return_value=mock_resp):
             result = client.contradictions(user_id="u1")
             assert result == {"contradictions": []}
 
@@ -154,7 +153,7 @@ class TestClientMethods(unittest.TestCase):
 
 class TestAsyncClientImport(unittest.TestCase):
     def test_import_does_not_fail(self):
-        from memgraph_sdk import AsyncMemgraphClient
+        pass
         # AsyncMemgraphClient may be None if httpx not installed
         # but the import itself should not fail
 
@@ -246,7 +245,7 @@ class TestAsyncClientCloudVsOnPremURL(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         try:
-            import httpx
+            import httpx  # noqa: F401
             cls.has_httpx = True
         except ImportError:
             cls.has_httpx = False
