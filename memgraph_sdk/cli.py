@@ -311,13 +311,13 @@ def setup_cmd(api_key: str):
             print(f"  Connected to {api_url}")
             print(f"  Tenant: {tenant_name} ({tenant_id})")
         elif resp.status_code in (401, 403):
-            print(f"  Invalid API key. Check your key and try again.")
+            print("  Invalid API key. Check your key and try again.")
             return
         else:
             # Fallback: try health check, use key without whoami
             tenant_id = os.getenv("MEMGRAPH_TENANT_ID", "")
             tenant_name = ""
-            print(f"  Connected (whoami not available, using provided config)")
+            print("  Connected (whoami not available, using provided config)")
     except requests.ConnectionError:
         print(f"  Cannot connect to {api_url}")
         return
@@ -332,7 +332,6 @@ def setup_cmd(api_key: str):
     print(f"  Config saved to {CONFIG_FILE}")
 
     # 3. Auto-detect IDE and write MCP config
-    mcp_server_cmd = "python3 -m memgraph_sdk.mcp"
     mcp_env = {
         "MEMGRAPH_API_KEY": api_key,
     }

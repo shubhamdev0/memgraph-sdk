@@ -15,10 +15,11 @@ Environment variables:
 """
 
 import asyncio
+import json
 import logging
 import os
 import sys
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, List, Sequence
 
 # Configure logging to stderr (MCP uses stdout for JSON-RPC)
 logging.basicConfig(
@@ -32,7 +33,7 @@ logger = logging.getLogger("memgraph-mcp")
 try:
     from mcp.server import Server
     from mcp.server.stdio import stdio_server
-    from mcp.types import Tool, TextContent, Resource
+    from mcp.types import Resource, TextContent, Tool
 except ImportError:
     print(
         "Error: MCP library not installed. Install with: pip install 'memgraph-sdk[mcp]'",
@@ -40,9 +41,8 @@ except ImportError:
     )
     sys.exit(1)
 
-# Memgraph SDK import
-from memgraph_sdk import MemgraphClient
-from memgraph_sdk.exceptions import MemgraphConnectionError
+# Memgraph SDK import (must be after MCP import check above)
+from memgraph_sdk import MemgraphClient  # noqa: E402
 
 # --- Configuration ---
 API_KEY = os.getenv("MEMGRAPH_API_KEY")
@@ -192,8 +192,6 @@ async def handle_profile() -> Dict[str, Any]:
 # ============================================================================
 # MCP Protocol handlers
 # ============================================================================
-
-import json
 
 
 @app.list_tools()
