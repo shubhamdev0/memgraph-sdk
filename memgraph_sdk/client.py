@@ -238,3 +238,399 @@ class MemgraphClient:
         """List available benchmark scenarios."""
         resp = self._request("GET", "/benchmark/scenarios")
         return resp.json().get("scenarios", [])
+
+    # ------------------------------------------------------------------
+    # Temporal Query API
+    # ------------------------------------------------------------------
+
+    def belief_history(self, user_id: str, key: str, as_of: str = None,
+                       include_inactive: bool = True) -> List[Dict]:
+        """Get version history for a specific belief key.
+
+        Args:
+            user_id: Subject/user ID
+            key: The belief key to look up history for
+            as_of: Optional ISO timestamp for point-in-time snapshot
+            include_inactive: Whether to include superseded versions (default True)
+
+        Returns: List of belief versions ordered by created_at ascending
+        """
+        params: Dict[str, Any] = {"include_inactive": str(include_inactive).lower()}
+        if as_of:
+            params["as_of"] = as_of
+        resp = self._request("GET", f"/beliefs/history/{user_id}/{key}", params=params)
+        return resp.json()
+
+    def belief_timeline(self, user_id: str, domain: str = None,
+                        since: str = None, limit: int = 50) -> Dict[str, Any]:
+        """Get chronological timeline of all belief changes for a user.
+
+        Args:
+            user_id: Subject/user ID
+            domain: Optional domain filter
+            since: Optional ISO timestamp — only show changes after this time
+            limit: Max results (default 50)
+
+        Returns: {"subject_id": ..., "count": ..., "timeline": [...]}
+        """
+        params: Dict[str, Any] = {"limit": limit}
+        if domain:
+            params["domain"] = domain
+        if since:
+            params["since"] = since
+        resp = self._request("GET", f"/beliefs/timeline/{user_id}", params=params)
+        return resp.json()
+
+    # ------------------------------------------------------------------
+    # Memory Delete / Forget API
+    # ------------------------------------------------------------------
+
+    def forget(self, belief_id: str) -> Dict[str, Any]:
+        """Delete a specific belief by ID.
+
+        Returns: {"status": "deleted", "id": "..."}
+        """
+        resp = self._request("DELETE", f"/beliefs/{belief_id}")
+        return resp.json()
+
+    def forget_all(self, user_id: str, domain: Optional[str] = None,
+                   soft: bool = False) -> Dict[str, Any]:
+        """Bulk delete all beliefs for a user (optionally scoped to domain).
+
+        Args:
+            user_id: Subject/user ID to delete beliefs for
+            domain: Optional domain filter (e.g. 'work', 'tech', 'personal')
+            soft: If True, soft-delete (set inactive) instead of permanent delete
+
+        Returns: {"status": "deleted", "deleted": count, "domain": ...}
+        """
+        params: Dict[str, Any] = {"subject_id": user_id, "soft": str(soft).lower()}
+        if domain:
+            params["domain"] = domain
+        resp = self._request("DELETE", "/beliefs", params=params)
+        return resp.json()
+
+    # ------------------------------------------------------------------
+    # Cognitive Sidecar API
+    # ------------------------------------------------------------------
+
+    def sidecar_pre_flight(self, message: str, user_id: str, thread_id: str = None,
+                           token_budget: int = 4000) -> Dict[str, Any]:
+        """Auto-recall: Fetch relevant memories before an LLM call.
+
+        Returns memory context ready to inject as a system message.
+        """
+        payload = {
+            "user_id": user_id,
+            "agent_id": "sdk_sidecar",
+            "message": message,
+            "token_budget": token_budget,
+            "include_profile": True,
+            "include_prospective": True,
+        }
+        if thread_id:
+            payload["thread_id"] = thread_id
+        resp = self._request("POST", "/sidecar/pre-flight", json=payload)
+        return resp.json()
+
+    def sidecar_post_flight(self, messages: List[Dict[str, str]], user_id: str,
+                            thread_id: str = None) -> Dict[str, Any]:
+        """Auto-learn: Extract learnable signals from a conversation exchange.
+
+        Learning happens in background — this returns immediately.
+        """
+        payload = {
+            "user_id": user_id,
+            "agent_id": "sdk_sidecar",
+            "messages": messages,
+        }
+        if thread_id:
+            payload["thread_id"] = thread_id
+        resp = self._request("POST", "/sidecar/post-flight", json=payload)
+        return resp.json()
+
+    def sidecar_process(self, messages: List[Dict[str, str]], user_id: str,
+                        thread_id: str = None, token_budget: int = 4000) -> Dict[str, Any]:
+        """Combined: Auto-recall for current message + auto-learn from previous exchanges.
+
+        This is the recommended single-call method for always-on memory.
+        """
+        payload = {
+            "user_id": user_id,
+            "agent_id": "sdk_sidecar",
+            "messages": messages,
+            "token_budget": token_budget,
+            "include_profile": True,
+            "include_prospective": True,
+        }
+        if thread_id:
+            payload["thread_id"] = thread_id
+        resp = self._request("POST", "/sidecar/process", json=payload)
+        return resp.json()
+
+    # ==================================================================
+    # v2 — Cognitive Infrastructure API
+    # ==================================================================
+
+    def _v2_request(self, method: str, path: str, **kwargs) -> requests.Response:
+        """Make a request to the v2 API. Automatically handles base URL rewriting."""
+        # Rewrite /v1 base to /v2
+        v2_base = self.base_url.replace("/v1", "/v2")
+        kwargs.setdefault("timeout", self.timeout)
+        url = f"{v2_base}{path}"
+
+        last_exc = None
+        for attempt in range(self.max_retries):
+            try:
+                resp = self._session.request(method, url, **kwargs)
+                self._raise_for_status(resp)
+                return resp
+            except (MemgraphRateLimitError, MemgraphAPIError, MemgraphConnectionError) as e:
+                last_exc = e
+                if attempt < self.max_retries - 1:
+                    wait = 2 ** attempt
+                    time.sleep(wait)
+            except (MemgraphAuthError, MemgraphValidationError):
+                raise
+            except requests.ConnectionError as e:
+                last_exc = MemgraphConnectionError(f"Cannot connect to Memgraph server: {e}")
+                if attempt < self.max_retries - 1:
+                    time.sleep(2 ** attempt)
+            except requests.Timeout as e:
+                last_exc = MemgraphConnectionError(f"Request timed out: {e}")
+                if attempt < self.max_retries - 1:
+                    time.sleep(2 ** attempt)
+        raise last_exc
+
+    # ------------------------------------------------------------------
+    # Context Graph (Core Interface)
+    # ------------------------------------------------------------------
+
+    def get_context_graph(
+        self,
+        query: str,
+        user_id: Optional[str] = None,
+        agent_id: Optional[str] = None,
+        include_decisions: bool = True,
+        include_graph: bool = True,
+        create_snapshot: bool = False,
+    ) -> Dict[str, Any]:
+        """6-stage context graph retrieval — the core Memgraph v2 interface.
+
+        Returns structured cognitive context including:
+        - Scored memories (beliefs, episodes, documents)
+        - Resolved entities
+        - Graph relationships
+        - Related decisions
+        - Optional context snapshot for decision tracking
+        """
+        payload: Dict[str, Any] = {
+            "query": query,
+            "include_decisions": include_decisions,
+            "include_graph": include_graph,
+            "create_snapshot": create_snapshot,
+        }
+        if user_id:
+            payload["user_id"] = user_id
+        if agent_id:
+            payload["agent_id"] = agent_id
+        resp = self._v2_request("POST", "/context", json=payload)
+        return resp.json()
+
+    # ------------------------------------------------------------------
+    # Entities
+    # ------------------------------------------------------------------
+
+    def create_entity(
+        self,
+        entity_type: str,
+        name: Optional[str] = None,
+        properties: Optional[Dict] = None,
+        aliases: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
+        """Create a new entity (person, organization, product, etc.)."""
+        payload: Dict[str, Any] = {"entity_type": entity_type}
+        if name:
+            payload["name"] = name
+        if properties:
+            payload["properties"] = properties
+        if aliases:
+            payload["aliases"] = aliases
+        resp = self._v2_request("POST", "/entities", json=payload)
+        return resp.json()
+
+    def get_entity(self, entity_id: str) -> Dict[str, Any]:
+        """Get an entity by ID."""
+        resp = self._v2_request("GET", f"/entities/{entity_id}")
+        return resp.json()
+
+    def list_entities(self, entity_type: Optional[str] = None, limit: int = 50) -> List[Dict]:
+        """List entities, optionally filtered by type."""
+        params: Dict[str, Any] = {"limit": limit}
+        if entity_type:
+            params["entity_type"] = entity_type
+        resp = self._v2_request("GET", "/entities", params=params)
+        return resp.json()
+
+    def search_entities(self, query: str, max_results: int = 5) -> List[Dict]:
+        """Search entities by name (trigram + semantic)."""
+        resp = self._v2_request("POST", "/entities/search", json={"query": query, "max_results": max_results})
+        return resp.json()
+
+    def delete_entity(self, entity_id: str) -> Dict[str, Any]:
+        """Delete an entity and its relationships."""
+        resp = self._v2_request("DELETE", f"/entities/{entity_id}")
+        return resp.json()
+
+    # ------------------------------------------------------------------
+    # Relationships
+    # ------------------------------------------------------------------
+
+    def create_relationship(
+        self,
+        source_entity_id: str,
+        target_entity_id: str,
+        relation_type: str,
+        confidence: float = 1.0,
+        valid_from: Optional[str] = None,
+        valid_to: Optional[str] = None,
+        evidence_sources: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
+        """Create a temporal relationship between two entities."""
+        payload: Dict[str, Any] = {
+            "source_entity_id": source_entity_id,
+            "target_entity_id": target_entity_id,
+            "relation_type": relation_type,
+            "confidence": confidence,
+        }
+        if valid_from:
+            payload["valid_from"] = valid_from
+        if valid_to:
+            payload["valid_to"] = valid_to
+        if evidence_sources:
+            payload["evidence_sources"] = evidence_sources
+        resp = self._v2_request("POST", "/relationships", json=payload)
+        return resp.json()
+
+    def list_relationships(
+        self, entity_id: Optional[str] = None, relation_type: Optional[str] = None, limit: int = 50
+    ) -> List[Dict]:
+        """List relationships, optionally filtered."""
+        params: Dict[str, Any] = {"limit": limit}
+        if entity_id:
+            params["entity_id"] = entity_id
+        if relation_type:
+            params["relation_type"] = relation_type
+        resp = self._v2_request("GET", "/relationships", params=params)
+        return resp.json()
+
+    # ------------------------------------------------------------------
+    # Decisions
+    # ------------------------------------------------------------------
+
+    def record_decision(
+        self,
+        goal: str,
+        reasoning_steps: Optional[List[Dict]] = None,
+        tools_used: Optional[List[Dict]] = None,
+        beliefs_used: Optional[List[str]] = None,
+        confidence: Optional[float] = None,
+        outcome: Optional[str] = None,
+        outcome_assessment: Optional[str] = None,
+        agent_id: Optional[str] = None,
+        user_id: Optional[str] = None,
+        episode_id: Optional[str] = None,
+        create_snapshot: bool = False,
+    ) -> Dict[str, Any]:
+        """Record an AI agent decision with full reasoning traces."""
+        payload: Dict[str, Any] = {"goal": goal, "create_snapshot": create_snapshot}
+        if reasoning_steps:
+            payload["reasoning_steps"] = reasoning_steps
+        if tools_used:
+            payload["tools_used"] = tools_used
+        if beliefs_used:
+            payload["beliefs_used"] = beliefs_used
+        if confidence is not None:
+            payload["confidence"] = confidence
+        if outcome:
+            payload["outcome"] = outcome
+        if outcome_assessment:
+            payload["outcome_assessment"] = outcome_assessment
+        if agent_id:
+            payload["agent_id"] = agent_id
+        if user_id:
+            payload["user_id"] = user_id
+        if episode_id:
+            payload["episode_id"] = episode_id
+        resp = self._v2_request("POST", "/decisions", json=payload)
+        return resp.json()
+
+    def get_decision(self, decision_id: str) -> Dict[str, Any]:
+        """Get a decision by ID."""
+        resp = self._v2_request("GET", f"/decisions/{decision_id}")
+        return resp.json()
+
+    def explain_decision(self, decision_id: str) -> Dict[str, Any]:
+        """Explain a decision: reasoning, context snapshot, beliefs used."""
+        resp = self._v2_request("GET", f"/decisions/{decision_id}/explain")
+        return resp.json()
+
+    def list_decisions(
+        self, agent_id: Optional[str] = None, user_id: Optional[str] = None,
+        outcome: Optional[str] = None, limit: int = 50
+    ) -> List[Dict]:
+        """List decisions, optionally filtered."""
+        params: Dict[str, Any] = {"limit": limit}
+        if agent_id:
+            params["agent_id"] = agent_id
+        if user_id:
+            params["user_id"] = user_id
+        if outcome:
+            params["outcome"] = outcome
+        resp = self._v2_request("GET", "/decisions", params=params)
+        return resp.json()
+
+    # ------------------------------------------------------------------
+    # Graph Traversal
+    # ------------------------------------------------------------------
+
+    def traverse_graph(
+        self, entity_ids: List[str], max_depth: int = 2, temporal_filter: bool = True
+    ) -> Dict[str, Any]:
+        """Traverse the entity relationship graph from seed entities."""
+        payload = {
+            "entity_ids": entity_ids,
+            "max_depth": max_depth,
+            "temporal_filter": temporal_filter,
+        }
+        resp = self._v2_request("POST", "/graph/traverse", json=payload)
+        return resp.json()
+
+    # ------------------------------------------------------------------
+    # Contradictions
+    # ------------------------------------------------------------------
+
+    def list_contradictions(self, status: Optional[str] = None, limit: int = 50) -> List[Dict]:
+        """List detected contradictions."""
+        params: Dict[str, Any] = {"limit": limit}
+        if status:
+            params["status"] = status
+        resp = self._v2_request("GET", "/contradictions", params=params)
+        return resp.json()
+
+    def resolve_contradiction(
+        self, contradiction_id: str, resolution_status: str = "resolved", resolved_by: str = "manual"
+    ) -> Dict[str, Any]:
+        """Resolve or dismiss a contradiction."""
+        payload = {"resolution_status": resolution_status, "resolved_by": resolved_by}
+        resp = self._v2_request("PATCH", f"/contradictions/{contradiction_id}", json=payload)
+        return resp.json()
+
+    # ------------------------------------------------------------------
+    # Analytics
+    # ------------------------------------------------------------------
+
+    def analytics(self) -> Dict[str, Any]:
+        """Get decision observability and memory analytics."""
+        resp = self._v2_request("GET", "/analytics")
+        return resp.json()
