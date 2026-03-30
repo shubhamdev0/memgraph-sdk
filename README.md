@@ -1,6 +1,6 @@
 # Memgraph SDK
 
-**Memory that thinks.** The official Python SDK for **[Memgraph](https://memgraph.ai)** — the cognitive memory layer for AI agents.
+**Memory that thinks.** The official Python SDK for **[Memgraph AI](https://memgraph.ai)** — the cognitive memory layer for AI agents.
 
 [![PyPI version](https://badge.fury.io/py/memgraph-sdk.svg)](https://pypi.org/project/memgraph-sdk/)
 [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
