@@ -137,9 +137,10 @@ class TestMCPToolHandlers(unittest.TestCase):
     def test_handle_search_calls_sdk(self, mock_client):
         """handle_search should call client.search()."""
         mock_client.search.return_value = {
-            "retrieved_items": [
-                {"type": "belief", "content": "uses PostgreSQL", "score": 95}
-            ]
+            "results": [
+                {"type": "belief", "content": "uses PostgreSQL", "score": 0.95, "metadata": {}}
+            ],
+            "total": 1,
         }
         result = _run(self.mcp_module.handle_search("database choice"))
 
@@ -187,12 +188,15 @@ class TestMCPToolHandlers(unittest.TestCase):
     @patch("memgraph_sdk.mcp.memgraph")
     def test_handle_search_limits_results(self, mock_client):
         """Search results should be limited to 5."""
+        # search() enforces limit internally, so mock returns limited set
         mock_client.search.return_value = {
-            "retrieved_items": [{"type": "belief", "content": f"item {i}", "score": 50} for i in range(10)]
+            "results": [{"type": "belief", "content": f"item {i}", "score": 0.5, "metadata": {}} for i in range(5)],
+            "total": 5,
         }
-        result = _run(self.mcp_module.handle_search("test"))
+        result = _run(self.mcp_module.handle_search("test", limit=5))
 
-        assert result["results_count"] == 5  # capped at 5
+        assert result["results_count"] == 5
+        mock_client.search.assert_called_once_with(query="test", user_id=unittest.mock.ANY, limit=5)
 
     @patch("memgraph_sdk.mcp.memgraph")
     def test_handle_profile_handles_error(self, mock_client):

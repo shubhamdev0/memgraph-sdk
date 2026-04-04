@@ -158,18 +158,8 @@ TOOLS = [
 async def handle_search(query: str, limit: int = 5) -> Dict[str, Any]:
     """Search memories with semantic similarity and result limiting."""
     try:
-        context = memgraph.search(query=query, user_id=AGENT_USER_ID)
-        retrieved_items = context.get("retrieved_items", [])
-        results = []
-        for item in retrieved_items[:limit]:
-            if not isinstance(item, dict):
-                continue
-            results.append({
-                "type": item.get("type", "memory"),
-                "content": item.get("content", ""),
-                "score": item.get("score", 0),
-                "metadata": item.get("metadata", {}),
-            })
+        search_result = memgraph.search(query=query, user_id=AGENT_USER_ID, limit=limit)
+        results = search_result.get("results", [])
         return {"success": True, "query": query, "results_count": len(results), "results": results}
     except Exception as e:
         logger.error("Error searching memories: %s", e)
@@ -203,18 +193,8 @@ async def handle_forget(belief_id: str = None, domain: str = None, soft: bool = 
 async def handle_recall(query: str, limit: int = 5) -> Dict[str, Any]:
     """Search memories with enhanced formatting."""
     try:
-        context = memgraph.search(query=query, user_id=AGENT_USER_ID)
-        retrieved_items = context.get("retrieved_items", [])
-        results = []
-        for item in retrieved_items[:limit]:
-            if not isinstance(item, dict):
-                continue
-            results.append({
-                "type": item.get("type", "memory"),
-                "content": item.get("content", ""),
-                "score": item.get("score", 0),
-                "metadata": item.get("metadata", {}),
-            })
+        search_result = memgraph.search(query=query, user_id=AGENT_USER_ID, limit=limit)
+        results = search_result.get("results", [])
         return {"success": True, "query": query, "results_count": len(results), "results": results}
     except Exception as e:
         logger.error("Error searching memories: %s", e)
@@ -267,17 +247,8 @@ async def handle_think(messages: List[Dict[str, str]], current_query: str = None
         recall_result = {"results": []}
         if current_query:
             try:
-                context = memgraph.search(query=current_query, user_id=AGENT_USER_ID)
-                retrieved_items = context.get("retrieved_items", [])
-                recall_result["results"] = [
-                    {
-                        "type": item.get("type", "memory"),
-                        "content": item.get("content", ""),
-                        "score": item.get("score", 0),
-                    }
-                    for item in retrieved_items[:8]
-                    if isinstance(item, dict)
-                ]
+                search_result = memgraph.search(query=current_query, user_id=AGENT_USER_ID, limit=8)
+                recall_result["results"] = search_result.get("results", [])
             except Exception as e:
                 logger.warning("Recall step failed in think: %s", e)
 

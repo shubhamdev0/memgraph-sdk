@@ -52,6 +52,7 @@ class AsyncMemgraphClient:
         self.tenant_id = tenant_id
         self.base_url = base_url or os.getenv("MEMGRAPH_API_URL", "https://api.memgraph.ai/v1")
         self.max_retries = max_retries
+        self.timeout = timeout
         self._client = httpx.AsyncClient(
             base_url=self.base_url,
             headers={"X-API-KEY": api_key},
@@ -177,17 +178,54 @@ class AsyncMemgraphClient:
         resp = await self._request("POST", "/beliefs", json=payload)
         return resp.json()
 
-    async def search(self, query: str, user_id: str, agent_id: str = "sdk_client") -> Dict[str, Any]:
-        """Retrieve relevant context for a query via /context endpoint."""
-        payload = {
-            "task": query,
-            "user_id": user_id,
-            "agent_id": agent_id,
-        }
-        if self.tenant_id is not None:
-            payload["tenant_id"] = self.tenant_id
-        resp = await self._request("POST", "/context", json=payload)
-        return resp.json()
+    async def search(self, query: str, user_id: str, agent_id: str = None, limit: int = 10) -> Dict[str, Any]:
+        """Search memories relevant to a query. Returns scored results.
+
+        Uses the v2 context endpoint which returns JSON with scored memories.
+
+        Returns:
+            Dict with 'results' list, each containing content, score, metadata.
+        """
+        # Build v2 URL from base URL
+        base = self.base_url.rstrip("/")
+        if "/v1" in base:
+            v2_url = base.replace("/v1", "/v2") + "/context"
+        elif "/v2" in base:
+            v2_url = base + "/context"
+        else:
+            v2_url = base + "/v2/context"
+
+        payload = {"query": query, "user_id": user_id}
+        if agent_id:
+            payload["agent_id"] = agent_id
+
+        try:
+            resp = await self._client.post(v2_url, json=payload, timeout=self.timeout)
+            resp.raise_for_status()
+            data = resp.json()
+
+            memories = data.get("memories", [])
+            results = []
+            for m in memories[:limit]:
+                results.append({
+                    "content": m.get("content", ""),
+                    "score": m.get("score", 0),
+                    "metadata": m.get("metadata", {}),
+                    "type": m.get("type", "belief"),
+                })
+            return {"results": results, "total": len(results)}
+
+        except Exception:
+            try:
+                beliefs = await self.get_beliefs(user_id=user_id, limit=limit)
+                items = beliefs if isinstance(beliefs, list) else beliefs.get("items", [])
+                results = [
+                    {"content": f"{b.get('key','')}: {b.get('value','')}", "score": 1.0, "metadata": b}
+                    for b in items[:limit]
+                ]
+                return {"results": results, "total": len(results)}
+            except Exception:
+                return {"results": [], "total": 0}
 
     async def get_context(self, query: str, user_id: str) -> Dict[str, Any]:
         """Alias for search()."""

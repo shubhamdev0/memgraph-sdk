@@ -382,17 +382,17 @@ def memgraph_tools(client, user_id: str, agent_id: str = "agent") -> list:
     def search_memory(query: str) -> str:
         """Search memory for relevant context."""
         try:
-            result = client.search(query=query, user_id=user_id, agent_id=agent_id)
-            items = result.get("retrieved_items", [])
+            result = client.search(query=query, user_id=user_id, agent_id=agent_id, limit=10)
+            items = result.get("results", [])
             if not items:
                 return "No relevant memories found."
 
             lines = []
-            for item in items[:10]:
+            for item in items:
                 content = item.get("content", "")
                 score = item.get("score", 0)
-                if score > 0.5:
-                    lines.append(f"- {content}")
+                if score > 0.3:
+                    lines.append(f"- [{score:.2f}] {content}")
 
             return "\n".join(lines) if lines else "No relevant memories found."
         except Exception as e:
