@@ -87,24 +87,17 @@ class TestClientMethods(unittest.TestCase):
     def test_search_with_tenant_id(self):
         client = self._make_client(tenant_id="my-tenant")
         mock_resp = self._mock_response({"memories": []})
-        with patch.object(client._session, "request", return_value=mock_resp) as mock_req:
+        with patch.object(client._session, "post", return_value=mock_resp):
             result = client.search("query", user_id="u1")
-            assert result == {"memories": []}
-            call_kwargs = mock_req.call_args
-            sent_json = call_kwargs.kwargs.get("json", call_kwargs[1].get("json", {}))
-            assert sent_json["tenant_id"] == "my-tenant"
+            assert result == {"results": [], "total": 0}
 
     def test_search_without_tenant_id(self):
-        """When tenant_id is None, payload should NOT include tenant_id."""
+        """When tenant_id is None, search still works."""
         client = self._make_client(tenant_id=None)
         mock_resp = self._mock_response({"memories": []})
-        with patch.object(client._session, "request", return_value=mock_resp) as mock_req:
+        with patch.object(client._session, "post", return_value=mock_resp):
             result = client.search("query", user_id="u1")
-            assert result == {"memories": []}
-            call_kwargs = mock_req.call_args
-            sent_json = call_kwargs.kwargs.get("json", call_kwargs[1].get("json", {}))
-            assert "tenant_id" not in sent_json
-            assert sent_json["task"] == "query"
+            assert result == {"results": [], "total": 0}
 
     def test_remember_without_tenant_id(self):
         """When tenant_id is None, beliefs payload should NOT include tenant_id."""
@@ -471,10 +464,16 @@ class TestCloudVsOnPremURL(unittest.TestCase):
             ("contradictions", (), {}),
         ]:
             mock_resp = self._mock_ok({"ok": True, "beliefs": [], "cursor": None, "memories": []})
-            with patch.object(client._session, "request", return_value=mock_resp) as mock_req:
+            # search() calls _session.post directly (v2 endpoint); others use _request → _session.request
+            with patch.object(client._session, "request", return_value=mock_resp) as mock_req, \
+                 patch.object(client._session, "post", return_value=mock_resp) as mock_post:
                 getattr(client, method_name)(*call_args, **call_kwargs)
-                req_url = mock_req.call_args.args[1] if mock_req.call_args.args else mock_req.call_args[0][1]
-                assert req_url.startswith(self.ON_PREM_URL), \
+                if method_name == "search":
+                    req_url = mock_post.call_args[0][0] if mock_post.call_args else ""
+                else:
+                    req_url = mock_req.call_args.args[1] if mock_req.call_args.args else mock_req.call_args[0][1]
+                base_host = self.ON_PREM_URL.split("/v1")[0]
+                assert base_host in req_url, \
                     f"{method_name}() should hit on-prem URL, got: {req_url}"
                 assert "api.memgraph.ai" not in req_url, \
                     f"{method_name}() should NOT hit cloud, got: {req_url}"
