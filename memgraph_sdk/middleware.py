@@ -249,39 +249,34 @@ class CognitiveSidecar:
         if self.thread_id:
             payload["thread_id"] = self.thread_id
 
-        resp = self.client._request("POST", "/sidecar/pre-flight", json=payload)
-        return resp.json()
+        return self.client.sidecar_pre_flight(
+            message=payload.get("message", ""),
+            user_id=self.user_id,
+            thread_id=self.thread_id,
+            agent_id=self.agent_id,
+            token_budget=self.token_budget,
+        )
 
     def _call_post_flight(self, messages: List[Dict[str, str]]) -> None:
         """Call the /v1/sidecar/post-flight endpoint (sync, for background thread)."""
         try:
-            payload = {
-                "user_id": self.user_id,
-                "agent_id": self.agent_id,
-                "messages": messages,
-            }
-            if self.thread_id:
-                payload["thread_id"] = self.thread_id
-
-            self.client._request("POST", "/sidecar/post-flight", json=payload)
+            self.client.sidecar_post_flight(
+                messages=messages,
+                user_id=self.user_id,
+                agent_id=self.agent_id,
+                thread_id=self.thread_id,
+            )
         except Exception as e:
             logger.warning("Post-flight API call failed: %s", e)
 
     def _call_process(self, messages: List[Dict[str, str]]) -> Dict[str, Any]:
         """Call the /v1/sidecar/process endpoint."""
-        payload = {
-            "user_id": self.user_id,
-            "agent_id": self.agent_id,
-            "messages": messages,
-            "token_budget": self.token_budget,
-            "include_profile": self.include_profile,
-            "include_prospective": self.include_prospective,
-        }
-        if self.thread_id:
-            payload["thread_id"] = self.thread_id
-
-        resp = self.client._request("POST", "/sidecar/process", json=payload)
-        return resp.json()
+        return self.client.sidecar_process(
+            messages=messages,
+            user_id=self.user_id,
+            agent_id=self.agent_id,
+            thread_id=self.thread_id,
+        )
 
     def _build_memory_injection(self, result: Dict[str, Any]) -> str:
         """Build the system message content for memory injection."""

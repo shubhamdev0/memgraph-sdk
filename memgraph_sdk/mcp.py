@@ -27,7 +27,7 @@ import json
 import logging
 import os
 import sys
-from typing import Any, Dict, List, Sequence
+from typing import Any, Dict, List, Optional, Sequence
 
 # Configure logging to stderr (MCP uses stdout for JSON-RPC)
 logging.basicConfig(
@@ -52,25 +52,38 @@ except ImportError:
 # Memgraph SDK import (must be after MCP import check above)
 from memgraph_sdk import MemgraphClient  # noqa: E402
 
-# --- Configuration ---
+# --- Configuration (lazy initialization) ---
 API_KEY = os.getenv("MEMGRAPH_API_KEY")
 TENANT_ID = os.getenv("MEMGRAPH_TENANT_ID")  # optional
 API_URL = os.getenv("MEMGRAPH_API_URL")  # optional, SDK defaults to cloud
 AGENT_USER_ID = os.getenv("MEMGRAPH_AGENT_USER_ID", "ai_agent")
 
-if not API_KEY:
-    logger.error("MEMGRAPH_API_KEY is required. Get one at https://memgraph.ai")
-    sys.exit(1)
+# Lazy client initialization — only created when first used.
+# Avoids sys.exit(1) at import time which breaks testing and IDE import scanning.
+memgraph: Optional[MemgraphClient] = None
 
-# Initialize client — tenant_id is optional (resolved server-side from API key)
-_client_kwargs: Dict[str, Any] = {"api_key": API_KEY}
-if TENANT_ID:
-    _client_kwargs["tenant_id"] = TENANT_ID
-if API_URL:
-    _client_kwargs["base_url"] = API_URL
 
-memgraph = MemgraphClient(**_client_kwargs)
-logger.info("Memgraph MCP Server initialized (v2 Cognitive): %s", memgraph.base_url)
+def _get_client() -> MemgraphClient:
+    """Get or create the Memgraph client. Raises RuntimeError if no API key."""
+    global memgraph
+    if memgraph is not None:
+        return memgraph
+
+    if not API_KEY:
+        raise RuntimeError(
+            "MEMGRAPH_API_KEY is required. Set it as an environment variable. "
+            "Get one at https://memgraph.ai"
+        )
+
+    kwargs: Dict[str, Any] = {"api_key": API_KEY}
+    if TENANT_ID:
+        kwargs["tenant_id"] = TENANT_ID
+    if API_URL:
+        kwargs["base_url"] = API_URL
+
+    memgraph = MemgraphClient(**kwargs)
+    logger.info("Memgraph MCP client initialized: %s", _get_client().base_url)
+    return memgraph
 
 # Create MCP server
 app = Server("memgraph-memory")
@@ -158,7 +171,7 @@ TOOLS = [
 async def handle_search(query: str, limit: int = 5) -> Dict[str, Any]:
     """Search memories with semantic similarity and result limiting."""
     try:
-        search_result = memgraph.search(query=query, user_id=AGENT_USER_ID, limit=limit)
+        search_result = _get_client().search(query=query, user_id=AGENT_USER_ID, limit=limit)
         results = search_result.get("results", [])
         return {"success": True, "query": query, "results_count": len(results), "results": results}
     except Exception as e:
@@ -169,7 +182,7 @@ async def handle_search(query: str, limit: int = 5) -> Dict[str, Any]:
 async def handle_remember(text: str, category: str = "general") -> Dict[str, Any]:
     """Store a memory."""
     try:
-        result = memgraph.remember(text=text, user_id=AGENT_USER_ID, category=category)
+        result = _get_client().remember(text=text, user_id=AGENT_USER_ID, category=category)
         return {"success": True, "message": f"Remembered: {text[:80]}...", "belief_id": result.get("id")}
     except Exception as e:
         logger.error("Error storing memory: %s", e)
@@ -180,10 +193,10 @@ async def handle_forget(belief_id: str = None, domain: str = None, soft: bool = 
     """Delete memories — specific belief or all for user."""
     try:
         if belief_id:
-            result = memgraph.forget(belief_id=belief_id)
+            result = _get_client().forget(belief_id=belief_id)
             return {"success": True, "message": f"Deleted belief {belief_id}", "result": result}
         else:
-            result = memgraph.forget_all(user_id=AGENT_USER_ID, domain=domain, soft=soft)
+            result = _get_client().forget_all(user_id=AGENT_USER_ID, domain=domain, soft=soft)
             return {"success": True, "message": "Bulk deleted memories", "result": result}
     except Exception as e:
         logger.error("Error deleting memory: %s", e)
@@ -193,7 +206,7 @@ async def handle_forget(belief_id: str = None, domain: str = None, soft: bool = 
 async def handle_recall(query: str, limit: int = 5) -> Dict[str, Any]:
     """Search memories with enhanced formatting."""
     try:
-        search_result = memgraph.search(query=query, user_id=AGENT_USER_ID, limit=limit)
+        search_result = _get_client().search(query=query, user_id=AGENT_USER_ID, limit=limit)
         results = search_result.get("results", [])
         return {"success": True, "query": query, "results_count": len(results), "results": results}
     except Exception as e:
@@ -204,7 +217,7 @@ async def handle_recall(query: str, limit: int = 5) -> Dict[str, Any]:
 async def handle_profile() -> Dict[str, Any]:
     """Get user profile."""
     try:
-        beliefs_data = memgraph.get_beliefs(user_id=AGENT_USER_ID, limit=20)
+        beliefs_data = _get_client().get_beliefs(user_id=AGENT_USER_ID, limit=20)
         items = beliefs_data.get("items", [])
         if not isinstance(items, list):
             items = []
@@ -247,7 +260,7 @@ async def handle_think(messages: List[Dict[str, str]], current_query: str = None
         recall_result = {"results": []}
         if current_query:
             try:
-                search_result = memgraph.search(query=current_query, user_id=AGENT_USER_ID, limit=8)
+                search_result = _get_client().search(query=current_query, user_id=AGENT_USER_ID, limit=8)
                 recall_result["results"] = search_result.get("results", [])
             except Exception as e:
                 logger.warning("Recall step failed in think: %s", e)
@@ -260,13 +273,9 @@ async def handle_think(messages: List[Dict[str, str]], current_query: str = None
 
         if has_user and has_assistant:
             try:
-                # Use the sidecar post-flight endpoint
-                payload = {
-                    "user_id": AGENT_USER_ID,
-                    "agent_id": "mcp_think",
-                    "messages": messages,
-                }
-                memgraph._request("POST", "/sidecar/post-flight", json=payload)
+                _get_client().sidecar_post_flight(
+                    messages=messages, user_id=AGENT_USER_ID, agent_id="mcp_think",
+                )
                 learning_triggered = True
             except Exception as e:
                 logger.warning("Learning step failed in think: %s", e)
@@ -364,10 +373,10 @@ async def read_resource(uri: str) -> str:
     uri_str = str(uri)
     if uri_str == "memgraph://project/status":
         try:
-            health = memgraph.ping()
+            health = _get_client().ping()
             return (
                 f"# Memgraph Status\n\n"
-                f"**Server**: {memgraph.base_url}\n"
+                f"**Server**: {_get_client().base_url}\n"
                 f"**Status**: {health.get('status', 'unknown')}\n"
                 f"**Version**: Cognitive Sidecar v2\n"
             )
@@ -376,7 +385,7 @@ async def read_resource(uri: str) -> str:
 
     elif uri_str == "memgraph://memory/recent":
         try:
-            beliefs = memgraph.get_beliefs(user_id=AGENT_USER_ID, limit=15)
+            beliefs = _get_client().get_beliefs(user_id=AGENT_USER_ID, limit=15)
             items = beliefs.get("items", [])
             if not isinstance(items, list):
                 items = []

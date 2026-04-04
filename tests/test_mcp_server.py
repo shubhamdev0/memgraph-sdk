@@ -55,7 +55,9 @@ class TestMCPServerModule(unittest.TestCase):
         try:
             import memgraph_sdk.mcp as mcp_module
             from memgraph_sdk import MemgraphClient
-            assert isinstance(mcp_module.memgraph, MemgraphClient)
+            # memgraph is lazy-initialized — test _get_client() instead
+            client = mcp_module._get_client()
+            assert isinstance(client, MemgraphClient)
         except SystemExit:
             self.fail("MCP module exited unexpectedly")
         finally:
@@ -123,20 +125,20 @@ class TestMCPToolHandlers(unittest.TestCase):
         if self.mcp_module is None:
             self.skipTest("MCP module failed to import (missing mcp library?)")
 
-    @patch("memgraph_sdk.mcp.memgraph")
+    @patch("memgraph_sdk.mcp._get_client")
     def test_handle_remember_calls_sdk(self, mock_client):
         """handle_remember should call client.remember()."""
-        mock_client.remember.return_value = {"id": "belief-123"}
+        mock_client.return_value.remember.return_value = {"id": "belief-123"}
         result = _run(self.mcp_module.handle_remember("test memory", category="general"))
 
         assert result["success"] is True
         assert result["belief_id"] == "belief-123"
-        mock_client.remember.assert_called_once()
+        mock_client.return_value.remember.assert_called_once()
 
-    @patch("memgraph_sdk.mcp.memgraph")
+    @patch("memgraph_sdk.mcp._get_client")
     def test_handle_search_calls_sdk(self, mock_client):
         """handle_search should call client.search()."""
-        mock_client.search.return_value = {
+        mock_client.return_value.search.return_value = {
             "results": [
                 {"type": "belief", "content": "uses PostgreSQL", "score": 0.95, "metadata": {}}
             ],
@@ -147,32 +149,32 @@ class TestMCPToolHandlers(unittest.TestCase):
         assert result["success"] is True
         assert result["results_count"] == 1
         assert result["results"][0]["content"] == "uses PostgreSQL"
-        mock_client.search.assert_called_once()
+        mock_client.return_value.search.assert_called_once()
 
-    @patch("memgraph_sdk.mcp.memgraph")
+    @patch("memgraph_sdk.mcp._get_client")
     def test_handle_search_handles_error(self, mock_client):
         """handle_search should handle errors gracefully."""
         from memgraph_sdk.exceptions import MemgraphConnectionError
 
-        mock_client.search.side_effect = MemgraphConnectionError("Connection refused")
+        mock_client.return_value.search.side_effect = MemgraphConnectionError("Connection refused")
         result = _run(self.mcp_module.handle_search("test query"))
 
         assert result["success"] is False
         assert "Connection refused" in result["error"]
 
-    @patch("memgraph_sdk.mcp.memgraph")
+    @patch("memgraph_sdk.mcp._get_client")
     def test_handle_remember_handles_error(self, mock_client):
         """handle_remember should handle errors gracefully."""
-        mock_client.remember.side_effect = Exception("Server error")
+        mock_client.return_value.remember.side_effect = Exception("Server error")
         result = _run(self.mcp_module.handle_remember("test"))
 
         assert result["success"] is False
         assert "Server error" in result["error"]
 
-    @patch("memgraph_sdk.mcp.memgraph")
+    @patch("memgraph_sdk.mcp._get_client")
     def test_handle_profile_calls_get_beliefs(self, mock_client):
         """handle_profile should call client.get_beliefs()."""
-        mock_client.get_beliefs.return_value = {
+        mock_client.return_value.get_beliefs.return_value = {
             "items": [
                 {"key": "preference_dark_mode", "value": "prefers dark mode", "confidence": 0.9, "belief_type": "belief"},
                 {"key": "tech_stack", "value": "uses PostgreSQL", "confidence": 0.95, "belief_type": "fact"},
@@ -183,35 +185,35 @@ class TestMCPToolHandlers(unittest.TestCase):
         assert result["success"] is True
         assert len(result["profile"]["preferences"]) == 1  # "prefer" in key
         assert len(result["profile"]["facts"]) == 1  # belief_type == "fact"
-        mock_client.get_beliefs.assert_called_once()
+        mock_client.return_value.get_beliefs.assert_called_once()
 
-    @patch("memgraph_sdk.mcp.memgraph")
+    @patch("memgraph_sdk.mcp._get_client")
     def test_handle_search_limits_results(self, mock_client):
         """Search results should be limited to 5."""
         # search() enforces limit internally, so mock returns limited set
-        mock_client.search.return_value = {
+        mock_client.return_value.search.return_value = {
             "results": [{"type": "belief", "content": f"item {i}", "score": 0.5, "metadata": {}} for i in range(5)],
             "total": 5,
         }
         result = _run(self.mcp_module.handle_search("test", limit=5))
 
         assert result["results_count"] == 5
-        mock_client.search.assert_called_once_with(query="test", user_id=unittest.mock.ANY, limit=5)
+        mock_client.return_value.search.assert_called_once_with(query="test", user_id=unittest.mock.ANY, limit=5)
 
-    @patch("memgraph_sdk.mcp.memgraph")
+    @patch("memgraph_sdk.mcp._get_client")
     def test_handle_profile_handles_error(self, mock_client):
         """handle_profile should handle errors gracefully."""
-        mock_client.get_beliefs.side_effect = Exception("DB error")
+        mock_client.return_value.get_beliefs.side_effect = Exception("DB error")
         result = _run(self.mcp_module.handle_profile())
 
         assert result["success"] is False
         assert "DB error" in result["error"]
 
-    @patch("memgraph_sdk.mcp.memgraph")
+    @patch("memgraph_sdk.mcp._get_client")
     def test_handle_remember_truncates_message(self, mock_client):
         """handle_remember should truncate long text in success message."""
         long_text = "x" * 200
-        mock_client.remember.return_value = {"id": "belief-456"}
+        mock_client.return_value.remember.return_value = {"id": "belief-456"}
         result = _run(self.mcp_module.handle_remember(long_text))
 
         assert result["success"] is True
@@ -244,7 +246,7 @@ class TestMCPCloudVsOnPremURL(unittest.TestCase):
         os.environ.pop("MEMGRAPH_API_URL", None)
         try:
             mcp = self._reimport_mcp()
-            assert mcp.memgraph.base_url == "https://api.memgraph.ai/v1"
+            assert mcp._get_client().base_url == "https://api.memgraph.ai/v1"
         except SystemExit:
             self.fail("MCP module exited unexpectedly")
         finally:
@@ -258,8 +260,8 @@ class TestMCPCloudVsOnPremURL(unittest.TestCase):
         """MCP server with MEMGRAPH_API_URL should use on-prem URL."""
         try:
             mcp = self._reimport_mcp()
-            assert mcp.memgraph.base_url == "http://my-server:8001/v1"
-            assert "api.memgraph.ai" not in mcp.memgraph.base_url
+            assert mcp._get_client().base_url == "http://my-server:8001/v1"
+            assert "api.memgraph.ai" not in mcp._get_client().base_url
         except SystemExit:
             self.fail("MCP module exited unexpectedly")
         finally:
@@ -273,7 +275,7 @@ class TestMCPCloudVsOnPremURL(unittest.TestCase):
         """MCP server with localhost URL for local development."""
         try:
             mcp = self._reimport_mcp()
-            assert mcp.memgraph.base_url == "http://localhost:8001/v1"
+            assert mcp._get_client().base_url == "http://localhost:8001/v1"
         except SystemExit:
             self.fail("MCP module exited unexpectedly")
         finally:
@@ -288,7 +290,7 @@ class TestMCPCloudVsOnPremURL(unittest.TestCase):
         os.environ.pop("MEMGRAPH_API_URL", None)
         try:
             mcp = self._reimport_mcp()
-            assert mcp.memgraph.tenant_id == "explicit-tenant"
+            assert mcp._get_client().tenant_id == "explicit-tenant"
         except SystemExit:
             self.fail("MCP module exited unexpectedly")
         finally:
@@ -301,7 +303,7 @@ class TestMCPCloudVsOnPremURL(unittest.TestCase):
         os.environ.pop("MEMGRAPH_API_URL", None)
         try:
             mcp = self._reimport_mcp()
-            assert mcp.memgraph.tenant_id is None
+            assert mcp._get_client().tenant_id is None
         except SystemExit:
             self.fail("MCP module exited unexpectedly")
         finally:
@@ -316,9 +318,9 @@ class TestMCPCloudVsOnPremURL(unittest.TestCase):
         """MCP server with full on-prem config (private IP + tenant + key)."""
         try:
             mcp = self._reimport_mcp()
-            assert mcp.memgraph.base_url == "http://10.0.1.100:8001/v1"
-            assert mcp.memgraph.tenant_id == "private-tenant"
-            assert mcp.memgraph.api_key == "mg_key"
+            assert mcp._get_client().base_url == "http://10.0.1.100:8001/v1"
+            assert mcp._get_client().tenant_id == "private-tenant"
+            assert mcp._get_client().api_key == "mg_key"
         except SystemExit:
             self.fail("MCP module exited unexpectedly")
         finally:
@@ -331,7 +333,7 @@ class TestMCPCloudVsOnPremURL(unittest.TestCase):
         os.environ.pop("MEMGRAPH_TENANT_ID", None)
         try:
             mcp = self._reimport_mcp()
-            assert mcp.memgraph.headers == {"X-API-KEY": "mg_key"}
+            assert mcp._get_client().headers == {"X-API-KEY": "mg_key"}
         except SystemExit:
             self.fail("MCP module exited unexpectedly")
         finally:

@@ -128,6 +128,17 @@ def init_project(non_interactive: bool = False):
             f.write(f"MEMGRAPH_API_KEY={api_key}\n")
     print(f"\n✅ Created {CONFIG_FILE}")
 
+    # Add .memgraph.env to .gitignore if it exists
+    gitignore = Path(".gitignore")
+    if gitignore.exists():
+        content = gitignore.read_text()
+        if CONFIG_FILE not in content:
+            with open(gitignore, "a") as f:
+                f.write(f"\n# Memgraph credentials\n{CONFIG_FILE}\n")
+            print(f"✅ Added {CONFIG_FILE} to .gitignore")
+    else:
+        print(f"⚠️  Add {CONFIG_FILE} to .gitignore to avoid committing credentials")
+
     # 4. Create skill directory
     skill_path = Path(SKILL_DIR)
     skill_path.mkdir(parents=True, exist_ok=True)

@@ -201,8 +201,10 @@ class MemgraphClient:
                 })
             return {"results": results, "total": len(results)}
 
-        except Exception:
-            # Fallback: return all beliefs for this user
+        except (MemgraphAuthError, MemgraphValidationError):
+            raise  # Auth/validation errors should not be silenced
+        except (MemgraphConnectionError, requests.exceptions.ConnectionError, requests.exceptions.Timeout):
+            # Connection issues: fallback to get_beliefs
             try:
                 beliefs = self.get_beliefs(user_id=user_id, limit=limit)
                 items = beliefs if isinstance(beliefs, list) else beliefs.get("items", [])
@@ -213,6 +215,9 @@ class MemgraphClient:
                 return {"results": results, "total": len(results)}
             except Exception:
                 return {"results": [], "total": 0}
+        except Exception:
+            # Unknown error: return empty (v2 endpoint may not exist on older servers)
+            return {"results": [], "total": 0}
 
     def get_beliefs(self, user_id: str, limit: int = 50, cursor: str = None) -> Dict:
         """Fetch beliefs for a user with cursor-based pagination."""
@@ -365,6 +370,7 @@ class MemgraphClient:
     # ------------------------------------------------------------------
 
     def sidecar_pre_flight(self, message: str, user_id: str, thread_id: str = None,
+                           agent_id: str = "sdk_sidecar",
                            token_budget: int = 4000) -> Dict[str, Any]:
         """Auto-recall: Fetch relevant memories before an LLM call.
 
@@ -372,7 +378,7 @@ class MemgraphClient:
         """
         payload = {
             "user_id": user_id,
-            "agent_id": "sdk_sidecar",
+            "agent_id": agent_id,
             "message": message,
             "token_budget": token_budget,
             "include_profile": True,
@@ -384,14 +390,15 @@ class MemgraphClient:
         return resp.json()
 
     def sidecar_post_flight(self, messages: List[Dict[str, str]], user_id: str,
-                            thread_id: str = None) -> Dict[str, Any]:
+                            thread_id: str = None,
+                            agent_id: str = "sdk_sidecar") -> Dict[str, Any]:
         """Auto-learn: Extract learnable signals from a conversation exchange.
 
         Learning happens in background — this returns immediately.
         """
         payload = {
             "user_id": user_id,
-            "agent_id": "sdk_sidecar",
+            "agent_id": agent_id,
             "messages": messages,
         }
         if thread_id:
@@ -400,14 +407,15 @@ class MemgraphClient:
         return resp.json()
 
     def sidecar_process(self, messages: List[Dict[str, str]], user_id: str,
-                        thread_id: str = None, token_budget: int = 4000) -> Dict[str, Any]:
+                        thread_id: str = None, agent_id: str = "sdk_sidecar",
+                        token_budget: int = 4000) -> Dict[str, Any]:
         """Combined: Auto-recall for current message + auto-learn from previous exchanges.
 
         This is the recommended single-call method for always-on memory.
         """
         payload = {
             "user_id": user_id,
-            "agent_id": "sdk_sidecar",
+            "agent_id": agent_id,
             "messages": messages,
             "token_budget": token_budget,
             "include_profile": True,
