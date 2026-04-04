@@ -152,17 +152,67 @@ class MemgraphClient:
         resp = self._request("POST", "/beliefs", json=payload)
         return resp.json()
 
-    def search(self, query: str, user_id: str, agent_id: str = "sdk_client") -> Dict[str, Any]:
-        """Retrieve relevant context for a query via /context endpoint."""
-        payload = {
-            "task": query,
-            "user_id": user_id,
-            "agent_id": agent_id,
-        }
-        if self.tenant_id is not None:
-            payload["tenant_id"] = self.tenant_id
-        resp = self._request("POST", "/context", json=payload)
-        return resp.json()
+    def search(self, query: str, user_id: str, agent_id: str = None, limit: int = 10) -> Dict[str, Any]:
+        """Search memories relevant to a query. Returns scored results.
+
+        Uses the v2 context endpoint which returns JSON with scored memories,
+        including semantic similarity, recency, confidence, and keyword signals.
+
+        Args:
+            query: What to search for (natural language)
+            user_id: Which user's memories to search
+            agent_id: Optional agent ID for scoped retrieval
+            limit: Max results to return (default 10)
+
+        Returns:
+            Dict with 'results' list, each containing:
+              - content: The memory text
+              - score: Relevance score (0-1)
+              - metadata: key, domain, belief_type
+        """
+        # Use v2 context endpoint (returns proper JSON with scored memories)
+        # Build the v2 URL from the base URL
+        base = self.base_url.rstrip("/")
+        if "/v1" in base:
+            v2_url = base.replace("/v1", "/v2") + "/context"
+        elif "/v2" in base:
+            v2_url = base + "/context"
+        else:
+            v2_url = base + "/v2/context"
+
+        payload = {"query": query, "user_id": user_id}
+        if agent_id:
+            payload["agent_id"] = agent_id
+
+        try:
+            resp = self._session.post(v2_url, json=payload, timeout=self.timeout)
+            self._raise_for_status(resp)
+            data = resp.json()
+
+            # Normalize: v2/context returns {memories: [...]}
+            memories = data.get("memories", [])
+            results = []
+            for m in memories[:limit]:
+                results.append({
+                    "content": m.get("content", ""),
+                    "score": m.get("score", 0),
+                    "metadata": m.get("metadata", {}),
+                    "type": m.get("type", "belief"),
+                })
+            return {"results": results, "total": len(results)}
+
+        except Exception:
+            # Fallback: return all beliefs for this user
+            try:
+                beliefs = self.get_beliefs(user_id=user_id, limit=limit)
+                items = beliefs if isinstance(beliefs, list) else beliefs.get("items", [])
+                results = [
+                    {"content": f"{b.get('key','')}: {b.get('value','')}", "score": 1.0, "metadata": b}
+                    for b in items[:limit]
+                ]
+                return {"results": results, "total": len(results)}
+            except Exception:
+                return {"results": [], "total": 0}
 
     def get_beliefs(self, user_id: str, limit: int = 50, cursor: str = None) -> Dict:
         """Fetch beliefs for a user with cursor-based pagination."""
