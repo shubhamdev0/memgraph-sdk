@@ -1,6 +1,8 @@
 <p align="center">
-  <img src="assets/banner.svg" alt="Memgraph AI — Memory that helps AI agents learn from their mistakes" width="700">
+  <img src="assets/logo.png" alt="Memgraph AI" width="400">
 </p>
+
+<h3 align="center">Memory that helps AI agents learn from their mistakes</h3>
 
 <p align="center">
   <a href="https://pypi.org/project/memgraph-sdk/"><img src="https://img.shields.io/pypi/v/memgraph-sdk?color=%2334D058&label=pypi" alt="PyPI version"></a>
