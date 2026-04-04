@@ -44,7 +44,6 @@ try:
     from langchain_core.retrievers import BaseRetriever
     from langchain_core.documents import Document
     from langchain_core.callbacks import CallbackManagerForRetrieverRun
-    from langchain_core.memory import BaseMemory
 except ImportError:
     raise ImportError(
         "LangChain not installed. Install with: pip install langchain langchain-core"
@@ -198,29 +197,21 @@ class MemgraphMemory(BaseChatMessageHistory):
 
 class MemgraphRetriever(BaseRetriever):
     """
-    LangChain-compatible retriever for semantic search in Memgraph OS.
-
-    This retriever searches across all Memgraph memory layers (events, episodes, beliefs)
-    and returns relevant documents.
+    LangChain-compatible retriever for semantic search in Memgraph AI.
 
     Example:
         retriever = MemgraphRetriever(
             api_key="mg_your_key",
             user_id="user123",
-            k=5
         )
-
-        # Use in a chain
-        from langchain.chains import RetrievalQA
-        from langchain_openai import ChatOpenAI
-
-        qa_chain = RetrievalQA.from_chain_type(
-            llm=ChatOpenAI(),
-            retriever=retriever
-        )
-
-        result = qa_chain.invoke("What databases are we using?")
+        docs = retriever.invoke("What databases are we using?")
     """
+
+    # Pydantic v2 fields (required by LangChain BaseRetriever)
+    client: Any = None
+    user_id: str = ""
+    k: int = 5
+    search_kwargs: Dict[str, Any] = {}
 
     def __init__(
         self,
@@ -229,28 +220,16 @@ class MemgraphRetriever(BaseRetriever):
         tenant_id: Optional[str] = None,
         k: int = 5,
         base_url: str = None,
-        search_kwargs: Optional[Dict[str, Any]] = None
+        search_kwargs: Optional[Dict[str, Any]] = None,
+        **kwargs
     ):
-        """
-        Initialize Memgraph retriever.
-
-        Args:
-            api_key: Memgraph API key
-            user_id: User identifier
-            tenant_id: Tenant identifier (optional — resolved from API key if omitted)
-            k: Number of documents to retrieve (default: 5)
-            base_url: Memgraph API URL (defaults to MEMGRAPH_API_URL env or cloud)
-            search_kwargs: Additional search parameters
-        """
-        super().__init__()
-        self.client = MemgraphClient(
-            api_key=api_key,
-            tenant_id=tenant_id,
-            base_url=base_url
+        super().__init__(
+            client=MemgraphClient(api_key=api_key, tenant_id=tenant_id, base_url=base_url),
+            user_id=user_id,
+            k=k,
+            search_kwargs=search_kwargs or {},
+            **kwargs,
         )
-        self.user_id = user_id
-        self.k = k
-        self.search_kwargs = search_kwargs or {}
 
     def _get_relevant_documents(
         self,
@@ -269,16 +248,28 @@ class MemgraphRetriever(BaseRetriever):
             List of LangChain Documents
         """
         try:
-            # Search Memgraph
-            context = self.client.search(
+            # Search Memgraph — returns {results: [{content, score, metadata}]}
+            result = self.client.search(
                 query=query,
-                user_id=self.user_id
+                user_id=self.user_id,
+                limit=self.k,
             )
 
             documents = []
 
-            # Add beliefs (long-term facts)
-            for belief in context.get("beliefs", [])[:self.k]:
+            for item in result.get("results", []):
+                content = item.get("content", "")
+                if content:
+                    metadata = {
+                        "source": "memgraph",
+                        "score": item.get("score", 0),
+                        "user_id": self.user_id,
+                    }
+                    metadata.update(item.get("metadata", {}))
+                    documents.append(Document(page_content=content, metadata=metadata))
+
+            # Legacy: also check beliefs/memories format for backward compat
+            for belief in result.get("beliefs", [])[:self.k]:
                 if isinstance(belief, dict):
                     content = f"{belief.get('key', '')}: {belief.get('value', '')}"
                     metadata = {
@@ -288,8 +279,7 @@ class MemgraphRetriever(BaseRetriever):
                     }
                     documents.append(Document(page_content=content, metadata=metadata))
 
-            # Add memories (episodes)
-            for memory in context.get("memories", [])[:self.k]:
+            for memory in result.get("memories", [])[:self.k]:
                 if isinstance(memory, dict):
                     text = memory.get("text", memory.get("content", ""))
                     if isinstance(text, dict):
@@ -302,20 +292,6 @@ class MemgraphRetriever(BaseRetriever):
                     }
                     documents.append(Document(page_content=text, metadata=metadata))
 
-            # Add recent events if not enough results
-            if len(documents) < self.k:
-                for event in context.get("history", [])[:self.k - len(documents)]:
-                    if isinstance(event, dict):
-                        content = event.get("content", {})
-                        text = content.get("text", "") if isinstance(content, dict) else str(content)
-
-                        metadata = {
-                            "source": "event",
-                            "event_type": event.get("event_type"),
-                            "user_id": self.user_id
-                        }
-                        documents.append(Document(page_content=text, metadata=metadata))
-
             return documents[:self.k]
 
         except Exception as e:
@@ -324,10 +300,12 @@ class MemgraphRetriever(BaseRetriever):
 
 
 # ============================================================================
-# MemgraphConversationMemory - For Chains and Agents
+# NOTE: MemgraphConversationMemory removed — BaseMemory was removed from
+# LangChain in v1.x. Use MemgraphMemory (BaseChatMessageHistory) instead,
+# which works with RunnableWithMessageHistory.
 # ============================================================================
 
-class MemgraphConversationMemory(BaseMemory):
+class _MemgraphConversationMemoryLegacy:
     """
     LangChain conversation memory backed by Memgraph OS.
 

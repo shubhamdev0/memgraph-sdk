@@ -26,9 +26,12 @@ from typing import Any, Optional, Type
 from pydantic import BaseModel, Field
 
 try:
-    from crewai_tools import BaseTool
+    from crewai.tools import BaseTool
 except ImportError:
-    raise ImportError("crewai-tools is required. Install with: pip install crewai-tools")
+    try:
+        from crewai_tools import BaseTool
+    except ImportError:
+        raise ImportError("crewai is required. Install with: pip install crewai")
 
 from memgraph_sdk import MemgraphClient
 
@@ -72,15 +75,15 @@ class MemgraphSearchTool(BaseTool):
     def _run(self, query: str) -> str:
         client = MemgraphClient(
             api_key=self.api_key,
-            tenant_id=self.tenant_id,
+            tenant_id=self.tenant_id or None,
             base_url=self.base_url,
         )
         result = client.search(query, user_id=self.user_id)
-        items = result.get("retrieved_items", [])
+        items = result.get("results", [])
         if not items:
             return "No relevant memories found."
         return "\n".join(
-            f"- [{it.get('type', 'memory')}] {it.get('content', it.get('text', str(it)))}"
+            f"- [{it.get('score', 0):.2f}] {it.get('content', str(it))}"
             for it in items[:10]
         )
 
@@ -108,7 +111,7 @@ class MemgraphRememberTool(BaseTool):
     def _run(self, text: str, category: str = "general") -> str:
         client = MemgraphClient(
             api_key=self.api_key,
-            tenant_id=self.tenant_id,
+            tenant_id=self.tenant_id or None,
             base_url=self.base_url,
         )
         client.remember(text, user_id=self.user_id, category=category)

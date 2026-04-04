@@ -174,11 +174,11 @@ See [examples/](examples/) for runnable integration code.
 
 **Integration examples (require additional deps):**
 
-| Example | Description | Requires |
-|---|---|---|
-| [LangChain](examples/integrations/langchain_integration.py) | Memory, Retriever, Toolkit | `langchain` |
-| [CrewAI](examples/integrations/crewai_integration.py) | Search and Remember tools | `crewai` |
-| [LlamaIndex](examples/integrations/llamaindex_integration.py) | Retriever and ToolSpec | `llama-index` |
+| Example | Description | Requires | Status |
+|---|---|---|---|
+| [LangChain](examples/integrations/langchain_integration.py) | Memory, Retriever, Toolkit | `langchain` | ✅ Tested |
+| [CrewAI](examples/integrations/crewai_integration.py) | Search and Remember tools | `crewai` | ✅ Tested |
+| [LlamaIndex](examples/integrations/llamaindex_integration.py) | Retriever and ToolSpec | `llama-index` | Untested |
 
 ## Contributing
 
