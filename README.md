@@ -1,12 +1,30 @@
-# Memgraph SDK
+<p align="center">
+  <img src="assets/banner.svg" alt="Memgraph AI — Memory that helps AI agents learn from their mistakes" width="700">
+</p>
 
-**Memory that thinks.** The official Python SDK for **[Memgraph AI](https://memgraph.ai)** — the cognitive memory layer for AI agents.
+<p align="center">
+  <a href="https://pypi.org/project/memgraph-sdk/"><img src="https://img.shields.io/pypi/v/memgraph-sdk?color=%2334D058&label=pypi" alt="PyPI version"></a>
+  <a href="https://pypi.org/project/memgraph-sdk/"><img src="https://img.shields.io/pypi/dm/memgraph-sdk" alt="Downloads"></a>
+  <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-3.8+-blue.svg" alt="Python 3.8+"></a>
+  <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="MIT License"></a>
+</p>
 
-[![PyPI version](https://badge.fury.io/py/memgraph-sdk.svg)](https://pypi.org/project/memgraph-sdk/)
-[![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+<p align="center">
+  <a href="https://memgraph.ai">Website</a> ·
+  <a href="https://github.com/shubhamdev0/memgraph-sdk/tree/main/examples">Examples</a> ·
+  <a href="https://github.com/shubhamdev0/memgraph-sdk/issues">Issues</a>
+</p>
 
-Not a vector store with a wrapper. A three-layer cognitive engine that distills raw events into episodes and crystallizes them into beliefs — with background Cognitive Dreaming that improves memory while your agents sleep.
+---
+
+**Memgraph AI** is a persistent memory layer for AI agents. Not a vector store with a wrapper — a cognitive engine that extracts beliefs from conversations, tracks how they evolve, and lets agents learn from their mistakes.
+
+**What makes it different:**
+- **Beliefs, not blobs** — Stores structured facts with confidence scores and types (fact / belief / tenet)
+- **Learns from corrections** — "Actually, I moved to Manchester" supersedes "Lives in London"
+- **Decision traces** — Track *why* your agent made each decision and what beliefs informed it
+- **Background consolidation** — Cognitive Dreaming merges, deduplicates, and resolves contradictions while your agents sleep
+- **Multi-tenant** — Each customer gets isolated memory with their own API key
 
 ## Installation
 
@@ -14,53 +32,83 @@ Not a vector store with a wrapper. A three-layer cognitive engine that distills 
 pip install memgraph-sdk
 ```
 
-With optional extras:
-
-```bash
-pip install "memgraph-sdk[async]"   # Async client (httpx)
-pip install "memgraph-sdk[mcp]"     # MCP server for Claude/Cursor
-pip install "memgraph-sdk[all]"     # Everything
-```
-
 ## Quick Start
 
 ```python
 from memgraph_sdk import MemgraphClient
 
-client = MemgraphClient(api_key="mg_your_api_key")
+mg = MemgraphClient(api_key="mg_your_api_key")
 
-# Store a memory
-client.add("User prefers dark mode and uses PyTorch.", user_id="alice")
+# Store memories (immediately searchable)
+mg.remember("Customer is on the Pro plan, $49/month", user_id="alice")
+mg.remember("Customer is allergic to peanuts", user_id="alice")
 
-# Store a belief directly
-client.remember("Prefers PyTorch over TensorFlow", user_id="alice", category="preference")
+# Search memories
+result = mg.search("What plan is Alice on?", user_id="alice")
+print(result["results"][0]["content"])
+# → "Customer is on the Pro plan, $49/month" (score: 0.76)
 
-# Search for relevant context
-result = client.search("What does this user prefer?", user_id="alice")
-print(result)
+# Get all beliefs for a user
+beliefs = mg.get_beliefs(user_id="alice")
 ```
 
-That's it. Two lines to set up, then store and recall. The `tenant_id` is resolved automatically from your API key.
+3 lines to set up. Store and search immediately. `tenant_id` is resolved automatically from your API key.
+
+## How It Works
+
+```
+Conversations → Events → Episodes → Beliefs → Decisions
+                             ↑                      ↓
+                     Cognitive Dreaming      Outcome Feedback
+                     (consolidation)         (learning loop)
+```
+
+| Layer | What it stores | Retention |
+|---|---|---|
+| **Events** | Raw messages, timestamps | Permanent |
+| **Episodes** | Grouped conversations with summaries | Permanent |
+| **Beliefs** | Extracted facts with confidence + type | Active (superseded archived) |
+| **Decisions** | What the agent decided + why + outcome | Permanent audit trail |
+
+## Core Methods
+
+```python
+# Store (immediately searchable)
+mg.remember("User prefers dark mode", user_id="alice", category="preference")
+
+# Store (async, goes through extraction pipeline)
+mg.add("Full conversation text here", user_id="alice")
+
+# Search (returns scored results)
+result = mg.search("UI preferences", user_id="alice")
+# → {"results": [{"content": "...", "score": 0.76, "metadata": {...}}]}
+
+# Get all beliefs
+beliefs = mg.get_beliefs(user_id="alice", limit=50)
+
+# Health check
+status = mg.health()
+```
 
 ## Async Client
 
 ```python
 from memgraph_sdk import AsyncMemgraphClient
 
-async with AsyncMemgraphClient(api_key="mg_your_api_key") as client:
-    await client.add("User prefers dark mode", user_id="alice")
-    result = await client.search("user preferences", user_id="alice")
+async with AsyncMemgraphClient(api_key="mg_your_api_key") as mg:
+    await mg.add("User prefers dark mode", user_id="alice")
+    result = await mg.search("preferences", user_id="alice")
 ```
 
 ## MCP Server (Claude / Cursor)
 
-One command to give your AI IDE persistent memory:
+Give your AI IDE persistent memory with one command:
 
 ```bash
 memgraph setup --key mg_your_api_key
 ```
 
-This auto-detects your IDE and writes the MCP config. Or configure manually:
+Auto-detects Cursor, Claude Desktop, VS Code. Or configure manually:
 
 ```json
 {
@@ -68,111 +116,68 @@ This auto-detects your IDE and writes the MCP config. Or configure manually:
     "memgraph": {
       "command": "python3",
       "args": ["-m", "memgraph_sdk.mcp"],
-      "env": {
-        "MEMGRAPH_API_KEY": "mg_your_api_key"
-      }
+      "env": { "MEMGRAPH_API_KEY": "mg_your_api_key" }
     }
   }
 }
 ```
 
-## Memory Intelligence API
-
-```python
-# Memory health metrics
-health = client.health(user_id="alice")
-
-# Detect contradictions
-contradictions = client.contradictions(user_id="alice")
-
-# Evaluate retrieval quality
-evaluation = client.evaluate(query="test query", user_id="alice")
-
-# Cognitive Integrity Score (0-100)
-score = client.mcis(user_id="alice")
-
-# Run benchmarks
-result = client.benchmark(scenario="contradiction_storm")
-```
-
 ## CLI
 
 ```bash
-# Set up MCP for your IDE (auto-detects Cursor, Claude, VS Code)
-memgraph setup --key mg_your_api_key
-
-# Store a memory
-memgraph remember "We decided to use PostgreSQL" -c decision
-
-# Search memories
-memgraph recall "database choice"
-
-# Check connection
-memgraph status
+memgraph setup --key mg_your_api_key    # Set up MCP for your IDE
+memgraph remember "We chose PostgreSQL"  # Store a memory
+memgraph recall "database choice"        # Search memories
+memgraph status                          # Check connection
 ```
 
-## Configuration
-
-### Cloud (default)
+## Self-Hosted
 
 ```python
-# Connects to https://api.memgraph.ai/v1 by default
-client = MemgraphClient(api_key="mg_your_key")
-```
-
-### Self-hosted
-
-```python
-client = MemgraphClient(
+# Point to your own server
+mg = MemgraphClient(
     api_key="mg_your_key",
     base_url="http://your-server:8001/v1",
 )
 ```
 
-Or via environment variable:
+Or via environment:
 
 ```bash
 export MEMGRAPH_API_URL=http://your-server:8001/v1
 export MEMGRAPH_API_KEY=mg_your_key
 ```
 
-### URL Resolution Priority
-
-1. `base_url` parameter (highest priority)
-2. `MEMGRAPH_API_URL` environment variable
-3. `https://api.memgraph.ai/v1` (cloud default)
-
-## How It Works
-
-```
-Raw Input → Events → Episodes → Beliefs
-              │          │          │
-          (short-term) (grouped)  (long-term)
-```
-
-- **Events**: Raw, immutable records with vector embeddings
-- **Episodes**: Auto-grouped sequences with LLM summaries
-- **Beliefs**: Extracted facts, preferences, decisions with confidence scores
-- **Cognitive Dreaming**: Background worker that consolidates, deduplicates, and resolves contradictions while your agents sleep
-
 ## Integrations
 
 Works with any AI framework:
 
-- **LangChain** — Memory, Retriever, Toolkit components
-- **OpenAI** — Function-calling agent and Assistants API
+- **OpenAI** — Function calling + Assistants API
+- **LangChain** — Memory, Retriever, Toolkit
 - **CrewAI** — Search and Remember tools
 - **LlamaIndex** — Retriever and ToolSpec
 
-See the [examples/](examples/) directory for complete integration examples.
+See [examples/](examples/) for runnable integration code.
 
-## Documentation
+## Examples
 
-- [Quick Start](https://memgraph.ai/docs)
-- [SDK Reference](https://memgraph.ai/docs)
-- [Self-Hosting Guide](https://memgraph.ai/docs)
-- [API Reference](https://memgraph.ai/docs)
+| Example | Description |
+|---|---|
+| [quick_start.py](examples/quick_start.py) | Store, search, update — 2 minutes |
+| [agent.py](examples/agent.py) | Interactive chat agent with memory |
+| [sdk_demo.py](examples/sdk_demo.py) | Core SDK in 30 lines |
+| [OpenAI](examples/integrations/openai_integration.py) | Function calling + memory |
+| [LangChain](examples/integrations/langchain_integration.py) | Memory adapter |
+| [CrewAI](examples/integrations/crewai_integration.py) | Shared agent memory |
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+
+## Security
+
+Report vulnerabilities to security@memgraph.ai. See [SECURITY.md](SECURITY.md).
 
 ## License
 
-MIT License. See [LICENSE](LICENSE) for details.
+MIT — see [LICENSE](LICENSE).
