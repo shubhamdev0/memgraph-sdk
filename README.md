@@ -163,14 +163,22 @@ See [examples/](examples/) for runnable integration code.
 
 ## Examples
 
-| Example | Description |
-|---|---|
-| [quick_start.py](examples/quick_start.py) | Store, search, update — 2 minutes |
-| [agent.py](examples/agent.py) | Interactive chat agent with memory |
-| [sdk_demo.py](examples/sdk_demo.py) | Core SDK in 30 lines |
-| [OpenAI](examples/integrations/openai_integration.py) | Function calling + memory |
-| [LangChain](examples/integrations/langchain_integration.py) | Memory adapter |
-| [CrewAI](examples/integrations/crewai_integration.py) | Shared agent memory |
+**Tested on production (api.memgraph.ai):**
+
+| Example | Description | Status |
+|---|---|---|
+| [quick_start.py](examples/quick_start.py) | Store, search, update — 2 minutes | ✅ Tested |
+| [agent.py](examples/agent.py) | Interactive chat agent with memory | ✅ Tested |
+| [sdk_demo.py](examples/sdk_demo.py) | Core SDK in 30 lines | ✅ Tested |
+| [OpenAI](examples/integrations/openai_integration.py) | Function calling + memory | ✅ Tested |
+
+**Integration examples (require additional deps):**
+
+| Example | Description | Requires |
+|---|---|---|
+| [LangChain](examples/integrations/langchain_integration.py) | Memory, Retriever, Toolkit | `langchain` |
+| [CrewAI](examples/integrations/crewai_integration.py) | Search and Remember tools | `crewai` |
+| [LlamaIndex](examples/integrations/llamaindex_integration.py) | Retriever and ToolSpec | `llama-index` |
 
 ## Contributing
 
