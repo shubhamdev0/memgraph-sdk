@@ -128,16 +128,11 @@ class MemgraphMemory(BaseChatMessageHistory):
         else:
             event_type = "message"
 
-        # Store in Memgraph
-        self.client.add(
-            text=message.content,
+        # Store in Memgraph (remember for immediate searchability)
+        self.client.remember(
+            text=f"[{message.type}] {message.content}",
             user_id=self.user_id,
-            metadata={
-                "event_type": event_type,
-                "session_id": self.session_id,
-                "timestamp": datetime.utcnow().isoformat(),
-                "message_type": message.type
-            }
+            category=event_type,
         )
 
         # Update cache
