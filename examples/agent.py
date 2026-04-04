@@ -1,48 +1,84 @@
-import os
+"""
+Memgraph AI — Interactive Agent with Memory
 
+Chat with an AI agent that remembers everything you tell it.
+Uses OpenAI for responses and Memgraph for persistent memory.
+
+Setup:
+    pip install memgraph-sdk openai
+    export MEMGRAPH_API_KEY=mg_your_key_here
+    export OPENAI_API_KEY=sk-your_key_here
+
+Run:
+    python examples/agent.py
+"""
+
+import os
 from memgraph_sdk import MemgraphClient
 
-# Config (Usually from env)
-API_KEY = "demo-key"
-TENANT_ID = "41d60ab2-2d26-4dcb-a0cc-d67e32215c71" # Nebula Corp from db seed
+try:
+    from openai import OpenAI
+except ImportError:
+    print("Install openai: pip install openai")
+    exit(1)
 
-def simulated_agent_loop():
-    client = MemgraphClient(api_key=API_KEY, tenant_id=TENANT_ID)
-    
-    user_id = "user_example_1"
-    print(f"--- Memgraph Memory Agent (User: {user_id}) ---")
+
+def main():
+    api_key = os.getenv("MEMGRAPH_API_KEY")
+    openai_key = os.getenv("OPENAI_API_KEY")
+
+    if not api_key:
+        print("Set MEMGRAPH_API_KEY: export MEMGRAPH_API_KEY=mg_your_key")
+        return
+    if not openai_key:
+        print("Set OPENAI_API_KEY: export OPENAI_API_KEY=sk-your_key")
+        return
+
+    mg = MemgraphClient(api_key=api_key)
+    oai = OpenAI(api_key=openai_key)
+    user_id = "interactive_user"
+
+    print("🤖 Memgraph Agent (type 'quit' to exit)")
+    print("   I remember everything you tell me.\n")
+
+    history = []
 
     while True:
-        user_input = input("User: ")
-        if user_input.lower() in ["exit", "quit"]:
+        user_input = input("You: ").strip()
+        if user_input.lower() in ("quit", "exit", "q"):
             break
-            
-        # 1. Get Context (RAG + Beliefs)
-        print("... Recalling memories ...")
-        context = client.get_context(query=user_input, user_id=user_id)
-        
-        # In a real app, you'd pass 'context' to LLM system prompt
-        beliefs = context.get('beliefs', [])
-        history = context.get('history', [])
-        
-        print("\n[🧠 Memory Context]")
-        if beliefs:
-            print("  Beliefs:")
-            for b in beliefs:
-                print(f"  - {b['key']}: {b['value']}")
-        else:
-            print("  - No relevant beliefs found.")
-            
-        print("\n[🤖 Agent Thought]")
-        print(f"I should use this context to answer: '{user_input}'")
-        
-        # 2. Log Interaction (to learn for next time)
-        client.log_event(
-            event_type="user_message",
-            content={"text": user_input},
-            metadata={"user_id": user_id}
+        if not user_input:
+            continue
+
+        # 1. Recall memories
+        memories = mg.get_beliefs(user_id=user_id, limit=20)
+        items = memories if isinstance(memories, list) else memories.get("items", [])
+
+        mem_text = ""
+        if items:
+            mem_text = "Known about this user:\n"
+            for b in items[:10]:
+                mem_text += f"  - {b['key']}: {b['value']}\n"
+
+        # 2. Generate response
+        messages = [
+            {"role": "system", "content": f"You are a helpful assistant with memory.\n{mem_text}"},
+        ]
+        messages.extend(history[-6:])  # Last 3 turns
+        messages.append({"role": "user", "content": user_input})
+
+        response = oai.chat.completions.create(
+            model="gpt-4o-mini", messages=messages, max_tokens=200,
         )
-        print("(Event logged for background learning)\n")
+        reply = response.choices[0].message.content
+        print(f"Agent: {reply}\n")
+
+        # 3. Store this interaction
+        mg.remember(f"User said: {user_input}", user_id=user_id, category="conversation")
+
+        history.append({"role": "user", "content": user_input})
+        history.append({"role": "assistant", "content": reply})
+
 
 if __name__ == "__main__":
-    simulated_agent_loop()
+    main()

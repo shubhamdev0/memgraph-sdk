@@ -1,43 +1,44 @@
-import os
-import time
+"""
+Memgraph AI — SDK Demo
 
+Shows the 3 core SDK operations: remember, search, get_beliefs.
+
+Setup:
+    pip install memgraph-sdk
+    export MEMGRAPH_API_KEY=mg_your_key_here
+
+Run:
+    python examples/sdk_demo.py
+"""
+
+import os
 from memgraph_sdk import MemgraphClient
 
-API_KEY = os.getenv("MEMGRAPH_API_KEY", "mg_test_sdk")
-TENANT_ID = os.getenv("MEMGRAPH_TENANT_ID", "demo-tenant")
 
 def main():
-    print("🚀 Initializing Memgraph Client...")
-    client = MemgraphClient(api_key=API_KEY, tenant_id=TENANT_ID)
+    api_key = os.getenv("MEMGRAPH_API_KEY")
+    if not api_key:
+        print("Set MEMGRAPH_API_KEY first: export MEMGRAPH_API_KEY=mg_your_key")
+        return
 
-    user_id = "sdk_user_01"
+    client = MemgraphClient(api_key=api_key)
 
-    # 1. Add a Memory
-    print("\n📝 Adding Memory...")
-    try:
-        res = client.add(
-            text="Hello from Python SDK! Feeling excited about Memgraph.",
-            user_id=user_id,
-            metadata={"mood": "Excited"}
-        )
-        print(f"✅ Memory Added: {res}")
-    except Exception as e:
-        print(f"❌ Add Failed: {e}")
+    # Store
+    client.remember("User prefers dark mode", user_id="demo", category="preference")
+    client.remember("User works at Acme Corp", user_id="demo", category="work")
+    print("✅ 2 memories stored")
 
-    # 2. Search Memory
-    print("\n🧠 Searching Memory...")
-    try:
-        time.sleep(1)  # Wait for ingestion
-        results = client.search(query="Hello SDK", user_id=user_id)
-        memories = results.get('memories', [])
-        print(f"✅ Memories Found: {len(memories)}")
-        for m in memories[:2]:
-            text = m.get('text', m.get('content', str(m)))
-            if isinstance(text, dict):
-                text = text.get('text', str(text))
-            print(f"   - {text[:80]}...")
-    except Exception as e:
-        print(f"❌ Search Failed: {e}")
+    # Search
+    import time; time.sleep(2)
+    result = client.search("UI preferences", user_id="demo")
+    for r in result.get("results", []):
+        print(f"🔍 [{r['score']:.2f}] {r['content']}")
+
+    # List all
+    beliefs = client.get_beliefs(user_id="demo")
+    items = beliefs if isinstance(beliefs, list) else beliefs.get("items", [])
+    print(f"📋 {len(items)} total beliefs stored")
+
 
 if __name__ == "__main__":
     main()
