@@ -36,11 +36,13 @@ logger = logging.getLogger(__name__)
 
 
 class AsyncMemgraphClient:
+    """Async Memgraph AI client using httpx."""
+
     def __init__(
         self,
         api_key: str,
-        tenant_id: str = None,
-        base_url: str = None,
+        tenant_id: Optional[str] = None,
+        base_url: Optional[str] = None,
         timeout: float = 30.0,
         max_retries: int = 3,
     ):
@@ -143,8 +145,11 @@ class AsyncMemgraphClient:
         except Exception as e:
             raise MemgraphConnectionError(f"Health check failed: {e}")
 
-    async def add(self, text: str, user_id: str, metadata: Optional[Dict] = None) -> Dict:
-        """Add a memory via the /ingest endpoint (event pipeline)."""
+    async def add(self, text: str, user_id: str) -> Dict:
+        """Add a memory via the /ingest endpoint (event pipeline).
+
+        Note: Events go through async processing. Use remember() for immediate searchability.
+        """
         data = {
             "user_id": user_id,
             "text": text,
@@ -161,9 +166,11 @@ class AsyncMemgraphClient:
             "decision": "work", "architecture": "tech", "bug_fix": "tech",
             "preference": "general", "general": "general",
         }
+        import hashlib
         short = text[:60].strip().lower()
         clean = "".join(c if c.isalnum() or c == " " else "" for c in short)
-        belief_key = f"{category}_{'_'.join(clean.split()[:6])}"
+        text_hash = hashlib.md5(text.encode()).hexdigest()[:6]
+        belief_key = f"{category}_{'_'.join(clean.split()[:5])}_{text_hash}"
 
         payload = {
             "subject_id": user_id,
@@ -227,31 +234,6 @@ class AsyncMemgraphClient:
             except Exception:
                 return {"results": [], "total": 0}
 
-    async def get_context(self, query: str, user_id: str) -> Dict[str, Any]:
-        """Alias for search()."""
-        return await self.search(query, user_id)
-
-    async def log_event(
-        self,
-        event_type: str,
-        content: Dict[str, Any],
-        user_id: str = "default_user",
-        agent_id: str = "sdk_client",
-        thread_id: Optional[str] = None,
-    ) -> Dict:
-        """Log a raw event to the /events endpoint."""
-        payload = {
-            "user_id": user_id,
-            "agent_id": agent_id,
-            "event_type": event_type,
-            "content": content,
-        }
-        if self.tenant_id is not None:
-            payload["tenant_id"] = self.tenant_id
-        if thread_id:
-            payload["thread_id"] = thread_id
-        resp = await self._request("POST", "/events", json=payload)
-        return resp.json()
 
     async def get_beliefs(self, user_id: str, limit: int = 50, cursor: str = None) -> Dict:
         """Fetch beliefs for a user with cursor-based pagination."""

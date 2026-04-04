@@ -14,7 +14,7 @@ except ImportError:
 
 def _run(coro):
     """Helper to run async functions in tests."""
-    return asyncio.get_event_loop().run_until_complete(coro)
+    return asyncio.run(coro)
 
 
 @unittest.skipUnless(HAS_MCP, "mcp library not installed (pip install 'memgraph-sdk[mcp]')")

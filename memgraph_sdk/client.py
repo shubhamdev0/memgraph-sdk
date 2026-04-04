@@ -17,11 +17,21 @@ logger = logging.getLogger(__name__)
 
 
 class MemgraphClient:
+    """Memgraph AI Python SDK client.
+
+    Args:
+        api_key: Your Memgraph API key (starts with mg_)
+        tenant_id: Optional tenant ID (resolved from API key if omitted)
+        base_url: API URL (default: https://api.memgraph.ai/v1)
+        timeout: Request timeout in seconds
+        max_retries: Max retry attempts for transient failures
+    """
+
     def __init__(
         self,
         api_key: str,
-        tenant_id: str = None,
-        base_url: str = None,
+        tenant_id: Optional[str] = None,
+        base_url: Optional[str] = None,
         timeout: float = 30.0,
         max_retries: int = 3,
     ):
@@ -34,7 +44,17 @@ class MemgraphClient:
         self._session = requests.Session()
         self._session.headers.update(self.headers)
 
-    def _request(self, method: str, path: str, **kwargs) -> requests.Response:
+    def close(self) -> None:
+        """Close the underlying HTTP session."""
+        self._session.close()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        self.close()
+
+    def _request(self, method: str, path: str, **kwargs: Any) -> requests.Response:
         """Make an HTTP request with retries and proper error handling."""
         kwargs.setdefault("timeout", self.timeout)
         url = f"{self.base_url}{path}"
@@ -52,6 +72,9 @@ class MemgraphClient:
                 time.sleep(wait)
             except MemgraphAPIError as e:
                 last_exc = e
+                # Only retry transient server errors (500, 502, 503, 504)
+                if e.status_code not in (500, 502, 503, 504):
+                    raise
                 if attempt < self.max_retries - 1:
                     wait = 2 ** attempt
                     logger.warning("Server error %s, retrying in %ds (attempt %d/%d)", e.status_code, wait, attempt + 1, self.max_retries)
@@ -113,10 +136,10 @@ class MemgraphClient:
         except Exception as e:
             raise MemgraphConnectionError(f"Health check failed: {e}")
 
-    def add(self, text: str, user_id: str, metadata: Optional[Dict] = None) -> Dict:
+    def add(self, text: str, user_id: str) -> Dict:
         """Add a memory via the /ingest endpoint (event pipeline).
 
-        Note: Events go through the episode pipeline and may take time to become searchable.
+        Note: Events go through async processing and may take time to become searchable.
         For immediate searchability, use remember() instead.
         """
         data = {
@@ -135,9 +158,12 @@ class MemgraphClient:
             "decision": "work", "architecture": "tech", "bug_fix": "tech",
             "preference": "general", "general": "general",
         }
+        import hashlib
         short = text[:60].strip().lower()
         clean = "".join(c if c.isalnum() or c == " " else "" for c in short)
-        belief_key = f"{category}_{'_'.join(clean.split()[:6])}"
+        # Add short hash suffix to avoid key collisions for similar text
+        text_hash = hashlib.md5(text.encode()).hexdigest()[:6]
+        belief_key = f"{category}_{'_'.join(clean.split()[:5])}_{text_hash}"
 
         payload = {
             "subject_id": user_id,
@@ -231,15 +257,6 @@ class MemgraphClient:
             params["cursor"] = cursor
         resp = self._request("GET", "/beliefs", params=params)
         return resp.json()
-
-    # Legacy compatibility
-    def log_event(self, event_type: str, content: Dict[str, Any], metadata: Optional[Dict] = None) -> Dict:
-        if "text" in content:
-            return self.add(content["text"], "legacy_user")
-        raise NotImplementedError("Generic log_event not fully supported yet.")
-
-    def get_context(self, query: str, user_id: str) -> Dict[str, Any]:
-        return self.search(query, user_id)
 
     # ------------------------------------------------------------------
     # Memory Intelligence API
@@ -430,35 +447,15 @@ class MemgraphClient:
     # v2 — Cognitive Infrastructure API
     # ==================================================================
 
-    def _v2_request(self, method: str, path: str, **kwargs) -> requests.Response:
-        """Make a request to the v2 API. Automatically handles base URL rewriting."""
-        # Rewrite /v1 base to /v2
-        v2_base = self.base_url.replace("/v1", "/v2")
-        kwargs.setdefault("timeout", self.timeout)
-        url = f"{v2_base}{path}"
-
-        last_exc = None
-        for attempt in range(self.max_retries):
-            try:
-                resp = self._session.request(method, url, **kwargs)
-                self._raise_for_status(resp)
-                return resp
-            except (MemgraphRateLimitError, MemgraphAPIError, MemgraphConnectionError) as e:
-                last_exc = e
-                if attempt < self.max_retries - 1:
-                    wait = 2 ** attempt
-                    time.sleep(wait)
-            except (MemgraphAuthError, MemgraphValidationError):
-                raise
-            except requests.ConnectionError as e:
-                last_exc = MemgraphConnectionError(f"Cannot connect to Memgraph server: {e}")
-                if attempt < self.max_retries - 1:
-                    time.sleep(2 ** attempt)
-            except requests.Timeout as e:
-                last_exc = MemgraphConnectionError(f"Request timed out: {e}")
-                if attempt < self.max_retries - 1:
-                    time.sleep(2 ** attempt)
-        raise last_exc
+    def _v2_request(self, method: str, path: str, **kwargs: Any) -> requests.Response:
+        """Make a request to the v2 API. Reuses _request() retry logic."""
+        # Temporarily swap base_url to v2
+        original_base = self.base_url
+        self.base_url = original_base.replace("/v1", "/v2")
+        try:
+            return self._request(method, path, **kwargs)
+        finally:
+            self.base_url = original_base
 
     # ------------------------------------------------------------------
     # Context Graph (Core Interface)

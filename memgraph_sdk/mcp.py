@@ -204,14 +204,8 @@ async def handle_forget(belief_id: str = None, domain: str = None, soft: bool = 
 
 
 async def handle_recall(query: str, limit: int = 5) -> Dict[str, Any]:
-    """Search memories with enhanced formatting."""
-    try:
-        search_result = _get_client().search(query=query, user_id=AGENT_USER_ID, limit=limit)
-        results = search_result.get("results", [])
-        return {"success": True, "query": query, "results_count": len(results), "results": results}
-    except Exception as e:
-        logger.error("Error searching memories: %s", e)
-        return {"success": False, "error": str(e), "results": []}
+    """Search memories (alias for handle_search)."""
+    return await handle_search(query=query, limit=limit)
 
 
 async def handle_profile() -> Dict[str, Any]:
