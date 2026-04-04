@@ -5,11 +5,11 @@ build-backend = "hatchling.build"
 [project]
 name = "memgraph-sdk"
 dynamic = ["version"]
-description = "Memory that thinks. The cognitive memory layer for AI agents — events, episodes, beliefs, and background dreaming."
+description = "Memory that helps AI agents learn from their mistakes. Store beliefs, search with semantic similarity, track decision traces."
 readme = "README.md"
-license = { file = "LICENSE" }
+license = "MIT"
 authors = [
-  { name = "Memgraph Team", email = "sdk@memgraph.ai" },
+  { name = "Memgraph AI", email = "hello@memgraph.ai" },
 ]
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -25,8 +25,9 @@ classifiers = [
     "Programming Language :: Python :: 3.13",
     "Topic :: Software Development :: Libraries :: Python Modules",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Typing :: Typed",
 ]
-keywords = ["memgraph", "ai", "memory", "agents", "llm", "rag", "context", "cognitive", "beliefs", "mcp", "langchain", "openai"]
+keywords = ["memgraph", "ai", "memory", "agents", "llm", "rag", "context", "cognitive", "beliefs", "mcp", "langchain", "openai", "decision-traces"]
 dependencies = [
     "requests>=2.25.0",
     "pydantic>=2.0.0",
