@@ -192,20 +192,29 @@ def remember_cmd(text: str, category: str = "general"):
         return
 
     try:
+        import hashlib
+        short = text[:60].strip().lower()
+        clean = "".join(c if c.isalnum() or c == " " else "" for c in short)
+        text_hash = hashlib.md5(text.encode()).hexdigest()[:6]
+        belief_key = f"{category}_{'_'.join(clean.split()[:5])}_{text_hash}"
+
         resp = requests.post(
-            f"{config['api_url']}/ingest",
-            data={
-                "tenant_id": config["tenant_id"],
-                "user_id": "cli_user",
-                "text": f"[{category}] {text}",
+            f"{config['api_url']}/beliefs",
+            json={
+                "subject_id": "cli_user",
+                "key": belief_key,
+                "value": text,
+                "confidence": 0.9,
+                "belief_type": "belief",
+                "domain": "general",
             },
             headers={"X-API-KEY": config.get("api_key", "")},
             timeout=10
         )
-        if resp.status_code == 200:
+        if resp.status_code in (200, 201):
             print(f"✅ Remembered: {text[:80]}...")
         else:
-            print(f"❌ Error: {resp.text}")
+            print(f"❌ Error: {resp.text[:200]}")
     except requests.ConnectionError:
         print("❌ Cannot connect to Memgraph server")
 
@@ -222,31 +231,30 @@ def recall_cmd(query: str):
         return
 
     try:
+        # Use v2/context endpoint (returns proper JSON with scored results)
+        v2_url = config['api_url'].replace("/v1", "/v2")
         resp = requests.post(
-            f"{config['api_url']}/context",
+            f"{v2_url}/context",
             json={
-                "tenant_id": config["tenant_id"],
+                "query": query,
                 "user_id": "cli_user",
-                "task": query,
-                "agent_id": "cli"
             },
             headers={"X-API-KEY": config.get("api_key", "")},
             timeout=10
         )
         if resp.status_code == 200:
             data = resp.json()
-            results = data.get("results", [])
-            if results:
-                print(f"\n🔍 Found {len(results)} results for '{query}':\n")
-                for r in results:
-                    if isinstance(r, dict):
-                        print(f"  • {r.get('text', r)}")
-                    else:
-                        print(f"  • {r}")
+            memories = data.get("memories", [])
+            if memories:
+                print(f"\n🔍 Found {len(memories)} results for '{query}':\n")
+                for m in memories:
+                    score = m.get("score", 0)
+                    content = m.get("content", str(m))
+                    print(f"  [{score:.2f}] {content}")
             else:
                 print("No memories found for this query.")
         else:
-            print(f"❌ Error: {resp.text}")
+            print(f"❌ Error: {resp.text[:200]}")
     except requests.ConnectionError:
         print("❌ Cannot connect to Memgraph server")
 

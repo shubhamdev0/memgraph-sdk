@@ -57,7 +57,7 @@ class TestCliRemember(unittest.TestCase):
 
             mock_requests.post.assert_called_once()
             call_url = mock_requests.post.call_args[0][0]
-            assert "/ingest" in call_url
+            assert "/beliefs" in call_url
 
 
 class TestCliRecall(unittest.TestCase):
@@ -441,7 +441,7 @@ class TestCliCloudVsOnPremURL(unittest.TestCase):
             remember_cmd("test on-prem memory", "general")
 
             call_url = mock_requests.post.call_args[0][0]
-            assert call_url == "http://onprem:8001/v1/ingest"
+            assert call_url == "http://onprem:8001/v1/beliefs"
             assert "api.memgraph.ai" not in call_url
 
     def test_recall_onprem_hits_correct_url(self):
@@ -465,7 +465,7 @@ class TestCliCloudVsOnPremURL(unittest.TestCase):
             recall_cmd("test on-prem query")
 
             call_url = mock_requests.post.call_args[0][0]
-            assert call_url == "http://onprem:8001/v1/context"
+            assert call_url == "http://onprem:8001/v2/context"
             assert "api.memgraph.ai" not in call_url
 
     def test_load_config_defaults_to_localhost(self):
