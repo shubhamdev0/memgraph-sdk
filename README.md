@@ -54,6 +54,10 @@ pip install "memgraph-sdk[mcp]"     # MCP server for Claude/Cursor
 pip install "memgraph-sdk[all]"     # Everything
 ```
 
+**Upgrading:** Use `pip install --upgrade memgraph-sdk` (not `--force-reinstall`, which can cause dependency conflicts with other packages like CrewAI).
+
+**Works with:** CrewAI, LangChain, OpenAI SDK, LlamaIndex — tested in shared environments.
+
 ## Quick Start (30 seconds)
 
 **Step 1: Get your API key** — sign up at [memgraph.ai](https://memgraph.ai), or via CLI:

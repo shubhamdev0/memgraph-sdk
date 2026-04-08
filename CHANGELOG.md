@@ -4,6 +4,12 @@ All notable changes to the Memgraph SDK will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.8.2] - 2026-04-08
+
+### Fixed
+- Added `<3.0.0` upper bounds to `requests` and `pydantic` deps to prevent pip from pulling incompatible major versions
+- README: added upgrade instructions (use `--upgrade`, not `--force-reinstall`) and compatibility note for CrewAI/LangChain
+
 ## [0.8.1] - 2026-04-08
 
 ### Added
