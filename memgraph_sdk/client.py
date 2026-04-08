@@ -35,9 +35,22 @@ class MemgraphClient:
         timeout: float = 30.0,
         max_retries: int = 3,
     ):
+        if not api_key or not isinstance(api_key, str):
+            raise MemgraphValidationError(
+                "api_key is required and must be a non-empty string. "
+                "Get your key at https://memgraph.ai"
+            )
+        if not api_key.startswith("mg_"):
+            raise MemgraphValidationError(
+                f"Invalid API key format: must start with 'mg_'. "
+                f"Got: '{api_key[:10]}...'"
+            )
         self.api_key = api_key
         self.tenant_id = tenant_id
-        self.base_url = base_url or os.getenv("MEMGRAPH_API_URL", "https://api.memgraph.ai/v1")
+        self.base_url = (
+            base_url
+            or os.getenv("MEMGRAPH_API_URL", "https://api.memgraph.ai/v1")
+        )
         self.timeout = timeout
         self.max_retries = max_retries
         self.headers = {"X-API-KEY": api_key}
@@ -127,14 +140,43 @@ class MemgraphClient:
             raise MemgraphAPIError(f"Server error: {detail}", status_code=code, response_body=body)
 
     def ping(self) -> Dict[str, Any]:
-        """Check server connectivity. Returns health status."""
+        """Check server connectivity AND validate API key.
+
+        Returns health status plus auth info (tenant_id, email).
+        Raises MemgraphAuthError if the API key is invalid.
+        Raises MemgraphConnectionError if the server is unreachable.
+        """
         try:
-            resp = self._session.get(f"{self.base_url.rsplit('/v1', 1)[0]}/health", timeout=5)
-            return resp.json()
+            base = self.base_url.rsplit("/v1", 1)[0]
+            health = self._session.get(
+                f"{base}/health", timeout=5
+            ).json()
         except requests.ConnectionError:
-            raise MemgraphConnectionError("Cannot reach Memgraph server at " + self.base_url)
+            raise MemgraphConnectionError(
+                "Cannot reach Memgraph server at " + self.base_url
+            )
         except Exception as e:
             raise MemgraphConnectionError(f"Health check failed: {e}")
+
+        # Validate API key by calling /auth/whoami
+        try:
+            resp = self._request("GET", "/auth/whoami")
+            whoami = resp.json()
+            health["tenant_id"] = whoami.get("tenant_id")
+            health["tenant_name"] = whoami.get("tenant_name")
+        except MemgraphAuthError:
+            raise  # Re-raise — bad API key
+        except Exception:
+            pass  # Server is up but whoami failed — still return health
+
+        return health
+
+    @staticmethod
+    def _validate_user_id(user_id: str) -> None:
+        if not user_id or not isinstance(user_id, str) or not user_id.strip():
+            raise MemgraphValidationError(
+                "user_id is required and must be a non-empty string."
+            )
 
     def add(self, text: str, user_id: str) -> Dict:
         """Add a memory via the /ingest endpoint (async extraction pipeline).
@@ -150,6 +192,7 @@ class MemgraphClient:
             text: Raw conversational text to ingest.
             user_id: User identifier to scope the memory.
         """
+        self._validate_user_id(user_id)
         data = {
             "user_id": user_id,
             "text": text,
@@ -162,6 +205,7 @@ class MemgraphClient:
     def remember(self, text: str, user_id: str, category: str = "general",
                  domain: Optional[str] = None, confidence: float = 0.90) -> Dict:
         """Store a memory as a belief with vector embedding for immediate searchability."""
+        self._validate_user_id(user_id)
         domain_map = {
             "decision": "work", "architecture": "tech", "bug_fix": "tech",
             "preference": "general", "general": "general",
@@ -204,6 +248,7 @@ class MemgraphClient:
               - score: Relevance score (0-1)
               - metadata: key, domain, belief_type
         """
+        self._validate_user_id(user_id)
         # Use v2 context endpoint (returns proper JSON with scored memories)
         # Build the v2 URL from the base URL
         base = self.base_url.rstrip("/")

@@ -4,6 +4,28 @@ All notable changes to the Memgraph SDK will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.8.1] - 2026-04-08
+
+### Added
+- `--version` / `-V` flag on CLI (`memgraph --version`)
+- API key format validation — must start with `mg_`, raises `MemgraphValidationError` on init
+- `user_id` validation — rejects empty strings in `add()`, `remember()`, `search()`
+- `ping()` now validates API key authenticity (calls `/auth/whoami`, not just `/health`)
+- Welcome banner in `memgraph setup` with next-step instructions
+- CLI `recall` shows visual score bars and truncates long content
+- CLI `remember` shows category in confirmation (`Remembered (architecture): ...`)
+- CLI `setup` validates API key format before connecting
+- Signup flow documented in README with step-by-step instructions
+- `.env` file setup guide in README
+- Rate limit table in README
+- Input validation section in README
+
+### Fixed
+- `ping()` with a fake API key no longer silently succeeds — raises `MemgraphAuthError`
+- All 4 example files rewritten with correct SDK v0.8 API calls
+- CLI help epilog now includes "Get started" instructions
+- `memgraph setup` success message shows Python quick-start snippet
+
 ## [0.8.0] - 2026-04-08
 
 ### Added

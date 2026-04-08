@@ -212,9 +212,9 @@ def remember_cmd(text: str, category: str = "general"):
             timeout=10
         )
         if resp.status_code in (200, 201):
-            print(f"✅ Remembered: {text[:80]}...")
+            print(f"✅ Remembered ({category}): {text[:80]}")
         else:
-            print(f"❌ Error: {resp.text[:200]}")
+            print(f"❌ Error ({resp.status_code}): {resp.text[:200]}")
     except requests.ConnectionError:
         print("❌ Cannot connect to Memgraph server")
 
@@ -257,11 +257,15 @@ def recall_cmd(query: str):
             # v2 returns {memories: [...]}, v1 returns {messages: [...]}
             memories = data.get("memories", [])
             if memories:
-                print(f"\n🔍 Found {len(memories)} results for '{query}':\n")
-                for m in memories:
+                print(f"\n🔍 Found {len(memories)} result(s) for '{query}':\n")
+                for i, m in enumerate(memories, 1):
                     score = m.get("score", 0)
                     content = m.get("content", str(m))
-                    print(f"  [{score:.2f}] {content}")
+                    # Truncate long content
+                    if len(content) > 120:
+                        content = content[:117] + "..."
+                    bar = "█" * int(score * 10) + "░" * (10 - int(score * 10))
+                    print(f"  {i}. [{score:.0%}] {bar}  {content}")
             else:
                 # v1 fallback: extract from messages
                 messages = data.get("messages", [])
@@ -338,13 +342,19 @@ def load_config():
 def setup_cmd(api_key: str):
     """One-command setup: validate key, detect IDE, configure MCP."""
     if not requests:
-        print("Error: 'requests' package not installed. Run: pip install requests")
+        print("Error: 'requests' package not installed.")
         return
 
     api_url = os.getenv("MEMGRAPH_API_URL", CLOUD_URL)
 
+    print()
+    print("  ╔══════════════════════════════════════╗")
+    print("  ║     Memgraph AI — Agent Memory       ║")
+    print("  ╚══════════════════════════════════════╝")
+    print()
+
     # 1. Validate API key via /v1/auth/whoami
-    print("Connecting to Memgraph...")
+    print("  Connecting...")
     try:
         resp = requests.get(
             f"{api_url}/auth/whoami",
@@ -445,7 +455,19 @@ def setup_cmd(api_key: str):
     except requests.ConnectionError:
         print("\n  Warning: Server health check failed (may still work)")
 
-    print("\n  Ready! Your AI assistant now has persistent memory.")
+    print()
+    print("  ✅ Ready! Your AI assistant now has persistent memory.")
+    print()
+    print("  Quick start:")
+    print("    memgraph remember \"We chose PostgreSQL\"")
+    print("    memgraph recall \"database choice\"")
+    print("    memgraph status")
+    print()
+    print("  Python:")
+    print("    from memgraph_sdk import MemgraphClient")
+    print(f"    mg = MemgraphClient(api_key=\"{api_key[:8]}...\")")
+    print("    mg.remember(\"fact\", user_id=\"alice\")")
+    print()
 
 
 def _write_mcp_config(path: Path, entry: dict):
@@ -469,17 +491,28 @@ def _write_mcp_config(path: Path, entry: dict):
 
 
 def main():
+    from memgraph_sdk import __version__
+
     parser = argparse.ArgumentParser(
-        description="Memgraph - AI Agent Memory Graph",
+        description="Memgraph — Memory that helps AI agents learn",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
+        epilog="""\
 Examples:
   memgraph setup --key mg_abc123   # One-command setup (recommended)
-  memgraph init                    # Interactive setup
   memgraph remember "Used JWT"     # Store a memory
   memgraph recall "authentication" # Search memories
   memgraph status                  # Check connection
+
+Get started:
+  1. Sign up at https://memgraph.ai (or self-host)
+  2. Copy your API key from Settings > API Keys
+  3. Run: memgraph setup --key mg_your_key
 """
+    )
+
+    parser.add_argument(
+        "--version", "-V", action="version",
+        version=f"memgraph-sdk {__version__}",
     )
 
     subparsers = parser.add_subparsers(dest="command")
@@ -512,8 +545,14 @@ Examples:
     if args.command == "setup":
         key = getattr(args, "key", None) or os.getenv("MEMGRAPH_API_KEY")
         if not key:
-            print("Error: API key required. Use --key or set MEMGRAPH_API_KEY env var.")
-            print("Get your key at https://memgraph.ai")
+            print("Error: API key required.\n")
+            print("  Option 1: memgraph setup --key mg_your_key")
+            print("  Option 2: export MEMGRAPH_API_KEY=mg_your_key")
+            print("\n  Get your key at https://memgraph.ai")
+            return
+        if not key.startswith("mg_"):
+            print("Error: Invalid API key format — must start with 'mg_'")
+            print(f"  Got: '{key[:15]}...'")
             return
         setup_cmd(key)
     elif args.command == "init":

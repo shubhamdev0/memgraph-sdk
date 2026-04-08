@@ -19,28 +19,28 @@ class TestVersion(unittest.TestCase):
 
 class TestClientInit(unittest.TestCase):
     def test_defaults(self):
-        client = MemgraphClient(api_key="test_key", tenant_id="test_tenant")
-        assert client.api_key == "test_key"
+        client = MemgraphClient(api_key="mg_test_key", tenant_id="test_tenant")
+        assert client.api_key == "mg_test_key"
         assert client.tenant_id == "test_tenant"
         assert client.base_url == "https://api.memgraph.ai/v1"
 
     def test_custom_url(self):
-        client = MemgraphClient(api_key="k", tenant_id="t", base_url="https://custom.api/v1")
+        client = MemgraphClient(api_key="mg_k", tenant_id="t", base_url="https://custom.api/v1")
         assert client.base_url == "https://custom.api/v1"
 
     def test_headers(self):
-        client = MemgraphClient(api_key="my_key", tenant_id="t")
-        assert client.headers == {"X-API-KEY": "my_key"}
+        client = MemgraphClient(api_key="mg_my_key", tenant_id="t")
+        assert client.headers == {"X-API-KEY": "mg_my_key"}
 
     def test_tenant_id_optional(self):
         """tenant_id can be omitted — server resolves from API key."""
-        client = MemgraphClient(api_key="my_key")
+        client = MemgraphClient(api_key="mg_my_key")
         assert client.tenant_id is None
-        assert client.api_key == "my_key"
+        assert client.api_key == "mg_my_key"
 
     @patch.dict("os.environ", {"MEMGRAPH_API_URL": "https://custom.env/v1"})
     def test_env_url_override(self):
-        client = MemgraphClient(api_key="k")
+        client = MemgraphClient(api_key="mg_k")
         assert client.base_url == "https://custom.env/v1"
 
 
@@ -48,7 +48,7 @@ class TestClientMethods(unittest.TestCase):
     """Test SDK methods with properly mocked session."""
 
     def _make_client(self, tenant_id="test-tenant-uuid"):
-        client = MemgraphClient(api_key="k", tenant_id=tenant_id)
+        client = MemgraphClient(api_key="mg_k", tenant_id=tenant_id)
         return client
 
     def _mock_response(self, json_data, status_code=200):
@@ -139,9 +139,9 @@ class TestClientMethods(unittest.TestCase):
 
     def test_existing_code_still_works(self):
         """Backward compat: existing code with explicit tenant_id unchanged."""
-        client = MemgraphClient(api_key="k", tenant_id="t")
+        client = MemgraphClient(api_key="mg_k", tenant_id="t")
         assert client.tenant_id == "t"
-        assert client.api_key == "k"
+        assert client.api_key == "mg_k"
 
 
 class TestAsyncClientImport(unittest.TestCase):
@@ -155,7 +155,7 @@ class TestExceptions(unittest.TestCase):
     """Test HTTP status code to exception mapping."""
 
     def test_auth_error_on_401(self):
-        client = MemgraphClient(api_key="k", tenant_id="t")
+        client = MemgraphClient(api_key="mg_k", tenant_id="t")
         mock_resp = MagicMock()
         mock_resp.ok = False
         mock_resp.status_code = 401
@@ -166,7 +166,7 @@ class TestExceptions(unittest.TestCase):
             client._raise_for_status(mock_resp)
 
     def test_rate_limit_on_429(self):
-        client = MemgraphClient(api_key="k", tenant_id="t")
+        client = MemgraphClient(api_key="mg_k", tenant_id="t")
         mock_resp = MagicMock()
         mock_resp.ok = False
         mock_resp.status_code = 429
@@ -178,7 +178,7 @@ class TestExceptions(unittest.TestCase):
         assert ctx.exception.retry_after == 30
 
     def test_validation_error_on_400(self):
-        client = MemgraphClient(api_key="k", tenant_id="t")
+        client = MemgraphClient(api_key="mg_k", tenant_id="t")
         mock_resp = MagicMock()
         mock_resp.ok = False
         mock_resp.status_code = 400
@@ -189,7 +189,7 @@ class TestExceptions(unittest.TestCase):
             client._raise_for_status(mock_resp)
 
     def test_server_error_on_500(self):
-        client = MemgraphClient(api_key="k", tenant_id="t")
+        client = MemgraphClient(api_key="mg_k", tenant_id="t")
         mock_resp = MagicMock()
         mock_resp.ok = False
         mock_resp.status_code = 500
@@ -201,7 +201,7 @@ class TestExceptions(unittest.TestCase):
 
     def test_no_retry_on_auth_error(self):
         """Auth errors (401/403) should NOT be retried."""
-        client = MemgraphClient(api_key="k", tenant_id="t")
+        client = MemgraphClient(api_key="mg_k", tenant_id="t")
         mock_resp = MagicMock()
         mock_resp.ok = False
         mock_resp.status_code = 403
@@ -215,16 +215,21 @@ class TestExceptions(unittest.TestCase):
 
 class TestPing(unittest.TestCase):
     def test_ping_strips_v1(self):
-        """Ping should hit /health not /v1/health."""
-        client = MemgraphClient(api_key="k", tenant_id="t")
-        mock_resp = MagicMock()
-        mock_resp.json.return_value = {"status": "ok"}
-        with patch.object(client._session, "get", return_value=mock_resp) as mock_get:
-            result = client.ping()
-            assert result == {"status": "ok"}
-            call_url = mock_get.call_args[0][0]
-            assert call_url.endswith("/health")
-            assert "/v1/health" not in call_url
+        """Ping should hit /health and then /auth/whoami."""
+        client = MemgraphClient(api_key="mg_k", tenant_id="t")
+        mock_health = MagicMock()
+        mock_health.json.return_value = {"status": "ok"}
+
+        mock_whoami = MagicMock()
+        mock_whoami.ok = True
+        mock_whoami.status_code = 200
+        mock_whoami.json.return_value = {"tenant_id": "t", "tenant_name": "Test"}
+
+        with patch.object(client._session, "get", return_value=mock_health):
+            with patch.object(client._session, "request", return_value=mock_whoami):
+                result = client.ping()
+                assert result["status"] == "ok"
+                assert result["tenant_id"] == "t"
 
 
 # ======================================================================
@@ -334,14 +339,19 @@ class TestCloudVsOnPremURL(unittest.TestCase):
             assert call_url.startswith(self.CLOUD_DEFAULT)
 
     def test_cloud_ping_health_url(self):
-        """Cloud: ping() hits https://api.memgraph.ai/health (not /v1/health)."""
+        """Cloud: ping() hits /health then /auth/whoami."""
         client = MemgraphClient(api_key="mg_key")
-        mock_resp = MagicMock()
-        mock_resp.json.return_value = {"status": "ok"}
-        with patch.object(client._session, "get", return_value=mock_resp) as mock_get:
-            client.ping()
-            call_url = mock_get.call_args[0][0]
-            assert call_url == "https://api.memgraph.ai/health"
+        mock_health = MagicMock()
+        mock_health.json.return_value = {"status": "ok"}
+        mock_whoami = MagicMock()
+        mock_whoami.ok = True
+        mock_whoami.status_code = 200
+        mock_whoami.json.return_value = {"tenant_id": "t"}
+        with patch.object(client._session, "get", return_value=mock_health) as mock_get:
+            with patch.object(client._session, "request", return_value=mock_whoami):
+                client.ping()
+                call_url = mock_get.call_args[0][0]
+                assert call_url == "https://api.memgraph.ai/health"
 
     # --- On-Prem via base_url parameter ---
 
@@ -434,11 +444,11 @@ class TestCloudVsOnPremURL(unittest.TestCase):
     def test_url_priority_param_over_env_over_default(self):
         """URL resolution priority: base_url param > env var > cloud default."""
         # param wins over env
-        c1 = MemgraphClient(api_key="k", base_url="http://param:8001/v1")
+        c1 = MemgraphClient(api_key="mg_k", base_url="http://param:8001/v1")
         assert c1.base_url == "http://param:8001/v1"
 
         # env wins over default
-        c2 = MemgraphClient(api_key="k")
+        c2 = MemgraphClient(api_key="mg_k")
         assert c2.base_url == "http://env-server:8001/v1"
 
     def test_url_priority_default_when_nothing_set(self):
@@ -446,7 +456,7 @@ class TestCloudVsOnPremURL(unittest.TestCase):
         import os
         with patch.dict("os.environ", {}, clear=False):
             os.environ.pop("MEMGRAPH_API_URL", None)
-            c = MemgraphClient(api_key="k")
+            c = MemgraphClient(api_key="mg_k")
             assert c.base_url == self.CLOUD_DEFAULT
 
     # --- All SDK methods route to correct URL ---

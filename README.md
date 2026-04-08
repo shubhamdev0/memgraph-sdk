@@ -56,6 +56,22 @@ pip install "memgraph-sdk[all]"     # Everything
 
 ## Quick Start (30 seconds)
 
+**Step 1: Get your API key** — sign up at [memgraph.ai](https://memgraph.ai), or via CLI:
+
+```bash
+# Cloud (recommended)
+pip install memgraph-sdk
+memgraph setup --key mg_your_api_key
+
+# Self-hosted
+docker compose up -d              # Start PostgreSQL + Memgraph
+memgraph setup --key mg_your_key  # Point to your server
+```
+
+> Your API key starts with `mg_`. Find it in Settings > API Keys after signing up.
+
+**Step 2: Use it:**
+
 ```python
 from memgraph_sdk import MemgraphClient
 
@@ -417,6 +433,43 @@ export MEMGRAPH_API_URL=http://your-server:8001/v1  # optional
 1. `base_url` parameter (highest)
 2. `MEMGRAPH_API_URL` environment variable
 3. `https://api.memgraph.ai/v1` (default)
+
+### Using a `.env` file
+
+Create a `.env` file (add to `.gitignore`!):
+
+```bash
+# .env
+MEMGRAPH_API_KEY=mg_your_key
+MEMGRAPH_API_URL=https://api.memgraph.ai/v1  # or your self-hosted URL
+```
+
+Load it in your app:
+
+```python
+from dotenv import load_dotenv
+load_dotenv()
+
+mg = MemgraphClient(api_key=os.environ["MEMGRAPH_API_KEY"])
+```
+
+### Rate limits
+
+| Tier | Requests/min | Beliefs | Entities |
+|------|-------------|---------|----------|
+| Free | 120 | 1,000 | 100 |
+| Pro | 600 | 50,000 | 5,000 |
+| Enterprise | Unlimited | Unlimited | Unlimited |
+
+The SDK auto-retries on 429 with exponential backoff. Catch `MemgraphRateLimitError` for custom handling.
+
+### Input validation
+
+The SDK validates inputs before sending requests:
+
+- **API key** must start with `mg_` — raises `MemgraphValidationError` if not
+- **user_id** must be a non-empty string — raises `MemgraphValidationError` if empty
+- **ping()** validates both connectivity AND API key authenticity
 
 ## How It Works
 
