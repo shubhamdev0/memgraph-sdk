@@ -230,20 +230,31 @@ def recall_cmd(query: str):
         print("Error: Not initialized. Run 'memgraph init' first.")
         return
 
+    headers = {"X-API-KEY": config.get("api_key", "")}
+    api_url = config["api_url"].rstrip("/")
+
     try:
-        # Use v2/context endpoint (returns proper JSON with scored results)
-        v2_url = config['api_url'].replace("/v1", "/v2")
+        # Try v2/context first (returns structured JSON with scored results)
+        v2_url = api_url.replace("/v1", "/v2")
         resp = requests.post(
             f"{v2_url}/context",
-            json={
-                "query": query,
-                "user_id": "cli_user",
-            },
-            headers={"X-API-KEY": config.get("api_key", "")},
-            timeout=10
+            json={"query": query, "user_id": "cli_user"},
+            headers=headers,
+            timeout=15,
         )
+
+        # Fall back to v1/context if v2 fails
+        if resp.status_code >= 500:
+            resp = requests.post(
+                f"{api_url}/context",
+                json={"query": query, "user_id": "cli_user", "agent_id": "cli"},
+                headers=headers,
+                timeout=15,
+            )
+
         if resp.status_code == 200:
             data = resp.json()
+            # v2 returns {memories: [...]}, v1 returns {messages: [...]}
             memories = data.get("memories", [])
             if memories:
                 print(f"\n🔍 Found {len(memories)} results for '{query}':\n")
@@ -252,9 +263,26 @@ def recall_cmd(query: str):
                     content = m.get("content", str(m))
                     print(f"  [{score:.2f}] {content}")
             else:
+                # v1 fallback: extract from messages
+                messages = data.get("messages", [])
+                if messages:
+                    # System message contains the injected context
+                    for msg in messages:
+                        is_memory_ctx = (
+                            msg.get("role") == "system"
+                            and "memories" in msg.get("content", "").lower()
+                        )
+                        if is_memory_ctx:
+                            print(f"\n🔍 Context retrieved for '{query}':\n")
+                            # Truncate long system messages
+                            content = msg["content"]
+                            if len(content) > 1000:
+                                content = content[:1000] + "..."
+                            print(f"  {content}")
+                            return
                 print("No memories found for this query.")
         else:
-            print(f"❌ Error: {resp.text[:200]}")
+            print(f"❌ Error ({resp.status_code}): {resp.text[:200]}")
     except requests.ConnectionError:
         print("❌ Cannot connect to Memgraph server")
 

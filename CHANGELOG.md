@@ -4,6 +4,47 @@ All notable changes to the Memgraph SDK will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.8.0] - 2026-04-08
+
+### Added
+- **Decisions & Reasoning Traces**: `record_decision()`, `get_decision()`, `explain_decision()`, `list_decisions()` — full decision debugging with reasoning steps, tools used, and outcome tracking
+- **Entities & Knowledge Graph**: `create_entity()`, `get_entity()`, `list_entities()`, `search_entities()`, `delete_entity()`
+- **Relationships**: `create_relationship()`, `list_relationships()`
+- **Graph Traversal**: `traverse_graph()` with depth control and temporal filtering
+- **Context Graph**: `get_context_graph()` — 6-stage retrieval pipeline (v2 API)
+- **Contradictions**: `list_contradictions()`, `resolve_contradiction()`
+- **Analytics**: `analytics()` endpoint for decision observability
+- **Cognitive Sidecar**: `sidecar_pre_flight()`, `sidecar_post_flight()`, `sidecar_process()` — always-on memory middleware
+- Comprehensive README with decision recording field reference tables
+- `forget()` and `forget_all()` methods for belief deletion
+
+### Fixed
+- CLI `recall` command now falls back to v1/context when v2/context is unavailable
+- CLI `recall` shows proper error messages instead of generic "Internal Server Error"
+- `record_decision()` docstring now documents exact field names for `reasoning_steps` and `tools_used`
+- `add()` docstring clarifies async extraction timing vs `remember()` for immediate searchability
+
+## [0.7.2] - 2026-04-04
+
+### Added
+- OpenAI Agents SDK integration: `MemgraphAgentHooks`, `MemgraphRunHooks`, `create_memgraph_agent()`
+- `memgraph_instructions()` — dynamic system prompt injector
+- `memgraph_tools()` — memory tool set for agents
+- `DecisionCapture` class for structured decision recording
+
+### Fixed
+- `search()` now uses v2/context endpoint for structured JSON responses
+- CLI `setup` command auto-detects Claude Code and writes MCP config
+- All 83 tests passing
+
+## [0.7.0] - 2026-04-03
+
+### Added
+- `MemgraphMemory` middleware for agent framework integration
+- `CognitiveSidecar` middleware for always-on memory
+- MCP server rewrite with 3 canonical tools
+- Async client parity with sync client
+
 ## [0.6.0] - 2026-03-30
 
 ### Added

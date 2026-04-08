@@ -137,10 +137,18 @@ class MemgraphClient:
             raise MemgraphConnectionError(f"Health check failed: {e}")
 
     def add(self, text: str, user_id: str) -> Dict:
-        """Add a memory via the /ingest endpoint (event pipeline).
+        """Add a memory via the /ingest endpoint (async extraction pipeline).
 
-        Note: Events go through async processing and may take time to become searchable.
-        For immediate searchability, use remember() instead.
+        The text is queued for background extraction — beliefs, entities, and
+        episodes are created asynchronously.  This means results may NOT be
+        immediately searchable.  Allow ~5-10 seconds for extraction to complete.
+
+        For **immediate** searchability, use ``remember()`` instead, which
+        creates a belief directly with a vector embedding.
+
+        Args:
+            text: Raw conversational text to ingest.
+            user_id: User identifier to scope the memory.
         """
         data = {
             "user_id": user_id,
@@ -597,7 +605,30 @@ class MemgraphClient:
         episode_id: Optional[str] = None,
         create_snapshot: bool = False,
     ) -> Dict[str, Any]:
-        """Record an AI agent decision with full reasoning traces."""
+        """Record an AI agent decision with full reasoning traces.
+
+        Args:
+            goal: What the agent was trying to accomplish.
+            reasoning_steps: List of steps, each with keys:
+                - step (int): Step number
+                - description (str): What was done in this step
+                - tool (str, optional): Tool used
+                - input (any, optional): Tool input
+                - output (any, optional): Tool output
+                - confidence (float, optional): Step confidence
+            tools_used: List of tools, each with keys:
+                - tool_name (str): Name of the tool
+                - tool_input (any, optional): Input to the tool
+                - tool_output (any, optional): Output from the tool
+            beliefs_used: List of belief text strings consulted.
+            confidence: Overall decision confidence (0.0-1.0).
+            outcome: Result — "SUCCESS", "FAILURE", "PARTIAL", "UNKNOWN", or "REVERTED".
+            outcome_assessment: Free-text explanation of the outcome.
+            agent_id: Agent identifier.
+            user_id: User identifier.
+            episode_id: Episode to link this decision to.
+            create_snapshot: Whether to persist a context snapshot.
+        """
         payload: Dict[str, Any] = {"goal": goal, "create_snapshot": create_snapshot}
         if reasoning_steps:
             payload["reasoning_steps"] = reasoning_steps
