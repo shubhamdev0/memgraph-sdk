@@ -4,6 +4,31 @@ All notable changes to the Memgraph SDK will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.8.3] - 2026-10-05
+
+### Fixed
+- **Parallel calls no longer misroute.** v2 calls used to swap `client.base_url` to `/v2` while in flight; other threads then hit the wrong API ("Not Found"), and overlapping v2 calls could leave the client stuck on `/v2`. URLs are now built per call.
+- **`search()` raises on server and network errors** instead of returning an empty result. It only falls back to listing beliefs when the server has no v2 API (404). Same for `AsyncMemgraphClient.search()`.
+- `search()` results now include the memory `id` (pass it to `forget()` or `beliefs_used`), and show clean text instead of `general_<words>_<hash>: text` for memories stored with `remember()`.
+- MCP server crashed on `mcp` 2.x (`'Server' object has no attribute 'list_tools'`). Pinned `mcp>=1.0.0,<2`.
+- MCP server now lists `memgraph_forget` and `memgraph_think` (the handlers existed but were never exposed). Deleting *all* memories requires an explicit `delete_all=true`.
+- CLI ignored `MEMGRAPH_API_KEY` / `MEMGRAPH_API_URL` without a `.memgraph.env` file. Environment variables now work on their own and take precedence.
+- `MemgraphClient("…", base_url="https://host")` without a `/v1` suffix now works.
+
+### Added
+- `record_outcome(decision_id, outcome, feedback)` — report how a decision turned out once you know. A FAILURE lowers the confidence of the beliefs it used and is shown as a lesson for similar tasks.
+- `delete_decision(decision_id)`.
+- `sidecar_post_flight(..., wait=True)` to learn synchronously and get counts (default returns immediately).
+- `AsyncMemgraphClient`: `forget`, `forget_all`, `sidecar_pre_flight`, `sidecar_post_flight`, `get_context_graph`, `record_decision`, `record_outcome`, `delete_decision`.
+- `MemgraphMemory.record_outcome()`; captured decisions expose `decision_id`.
+
+### Changed
+- `MemgraphMemory(auto_feedback=...)` is deprecated and ignored: outcome feedback is applied server-side whenever a decision has an outcome. (It used to only log.)
+- README: learn-from-mistakes guide, deleting user data, correct benchmark scenario names, `beliefs_used` takes belief IDs, accurate rate limits, MCP tools and `MEMGRAPH_AGENT_USER_ID`, removed the `docker compose` self-hosting line (no compose file ships with the SDK).
+
+### Requires
+- The learning-loop features (lessons in pre-flight, `include_decisions` results, immediate outcome feedback) need the October 2026 server release.
+
 ## [0.8.2] - 2026-04-08
 
 ### Fixed

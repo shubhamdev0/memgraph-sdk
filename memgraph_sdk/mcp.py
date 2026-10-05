@@ -4,13 +4,12 @@ Memgraph MCP Server - Cognitive Memory Integration for AI agents.
 
 Exposes Memgraph memory tools via MCP for Claude Desktop, Cursor, VS Code, etc.
 
-v2 UPGRADE: "Always-On" cognitive layer with:
-- memgraph_think: Process FULL conversation context, auto-recall + auto-learn in one call
-- memgraph_recall: Mandatory auto-recall before every response (enhanced search)
-- memgraph_remember: Store a memory (unchanged)
-- memgraph_profile: Get user profile (unchanged)
-
-The key change: Tool descriptions now MANDATE memory usage, not suggest it.
+Tools:
+- memgraph_search:   semantic search (memgraph_recall is accepted as an alias)
+- memgraph_remember: store a memory
+- memgraph_forget:   delete a wrong/outdated memory (by id from search results)
+- memgraph_think:    recall for the current topic + learn from the exchange
+- memgraph_profile:  consolidated profile
 
 Usage:
     python -m memgraph_sdk.mcp
@@ -19,7 +18,9 @@ Environment variables:
     MEMGRAPH_API_URL    - Backend URL (default: https://api.memgraph.ai/v1)
     MEMGRAPH_API_KEY    - API key (required, format: mg_...)
     MEMGRAPH_TENANT_ID  - Tenant ID (optional, resolved from API key if not set)
-    MEMGRAPH_AGENT_USER_ID - Default user ID for memories (default: ai_agent)
+    MEMGRAPH_AGENT_USER_ID - Whose memories this server reads/writes (default: ai_agent).
+                             Everyone using the same API key with the default
+                             shares one memory — set a distinct value per person.
 """
 
 import asyncio
@@ -150,6 +151,62 @@ TOOLS = [
         },
     ),
     Tool(
+        name="memgraph_forget",
+        description=(
+            "\n\nDelete a memory that is wrong or outdated.\n\n"
+            "Pass the belief_id from a memgraph_search result. Deleting ALL memories "
+            "requires delete_all=true and should only happen when the user explicitly asks.\n"
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "belief_id": {
+                    "type": "string",
+                    "description": "ID of the memory to delete (the 'id' field of a search result)",
+                },
+                "delete_all": {
+                    "type": "boolean",
+                    "description": "Delete every memory (optionally only one domain). Only on explicit user request.",
+                    "default": False,
+                },
+                "domain": {
+                    "type": "string",
+                    "description": "With delete_all: only delete memories in this domain",
+                },
+            },
+        },
+    ),
+    Tool(
+        name="memgraph_think",
+        description=(
+            "\n\nRecall memories for the current topic AND learn from the conversation in one call.\n\n"
+            "Pass the recent messages ({role, content}); facts and preferences the user stated "
+            "are learned in the background.\n"
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "messages": {
+                    "type": "array",
+                    "description": "Recent conversation messages",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "role": {"type": "string", "enum": ["user", "assistant"]},
+                            "content": {"type": "string"},
+                        },
+                        "required": ["role", "content"],
+                    },
+                },
+                "current_query": {
+                    "type": "string",
+                    "description": "What to recall for (defaults to the last user message)",
+                },
+            },
+            "required": ["messages"],
+        },
+    ),
+    Tool(
         name="memgraph_profile",
         description=(
             "\n\nGet the user's memory profile - beliefs, preferences, and facts that Memgraph\n"
@@ -189,15 +246,17 @@ async def handle_remember(text: str, category: str = "general") -> Dict[str, Any
         return {"success": False, "error": str(e)}
 
 
-async def handle_forget(belief_id: str = None, domain: str = None, soft: bool = False) -> Dict[str, Any]:
-    """Delete memories — specific belief or all for user."""
+async def handle_forget(belief_id: str = None, domain: str = None, soft: bool = False,
+                        delete_all: bool = False) -> Dict[str, Any]:
+    """Delete memories — one belief, or all of them with explicit delete_all."""
     try:
         if belief_id:
             result = _get_client().forget(belief_id=belief_id)
             return {"success": True, "message": f"Deleted belief {belief_id}", "result": result}
-        else:
-            result = _get_client().forget_all(user_id=AGENT_USER_ID, domain=domain, soft=soft)
-            return {"success": True, "message": "Bulk deleted memories", "result": result}
+        if not delete_all:
+            return {"success": False, "error": "Pass belief_id, or delete_all=true to delete every memory."}
+        result = _get_client().forget_all(user_id=AGENT_USER_ID, domain=domain, soft=soft)
+        return {"success": True, "message": "Bulk deleted memories", "result": result}
     except Exception as e:
         logger.error("Error deleting memory: %s", e)
         return {"success": False, "error": str(e)}
@@ -324,6 +383,7 @@ async def call_tool(name: str, arguments: dict) -> Sequence[TextContent]:
             belief_id=arguments.get("belief_id"),
             domain=arguments.get("domain"),
             soft=arguments.get("soft", False),
+            delete_all=arguments.get("delete_all", False),
         )
     elif name == "memgraph_profile":
         result = await handle_profile()

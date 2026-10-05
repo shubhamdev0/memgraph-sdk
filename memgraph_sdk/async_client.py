@@ -17,13 +17,14 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 try:
     import httpx
 except ImportError:
     httpx = None
 
+from memgraph_sdk.client import _api_root, _memory_text, _remember_key
 from memgraph_sdk.exceptions import (
     MemgraphAPIError,
     MemgraphAuthError,
@@ -56,7 +57,6 @@ class AsyncMemgraphClient:
         self.max_retries = max_retries
         self.timeout = timeout
         self._client = httpx.AsyncClient(
-            base_url=self.base_url,
             headers={"X-API-KEY": api_key},
             timeout=timeout,
         )
@@ -70,12 +70,16 @@ class AsyncMemgraphClient:
     async def close(self):
         await self._client.aclose()
 
-    async def _request(self, method: str, path: str, **kwargs) -> httpx.Response:
+    def _url(self, path: str, api: str = "v1") -> str:
+        return f"{_api_root(self.base_url)}/{api}{path}"
+
+    async def _request(self, method: str, path: str, *, api: str = "v1", **kwargs) -> httpx.Response:
         """Make an HTTP request with retries and proper error handling."""
         last_exc = None
+        url = self._url(path, api)
         for attempt in range(self.max_retries):
             try:
-                resp = await self._client.request(method, path, **kwargs)
+                resp = await self._client.request(method, url, **kwargs)
                 self._raise_for_status(resp)
                 return resp
             except MemgraphRateLimitError as e:
@@ -137,8 +141,7 @@ class AsyncMemgraphClient:
     async def ping(self) -> Dict[str, Any]:
         """Check server connectivity. Returns health status."""
         try:
-            base = self.base_url.rsplit("/v1", 1)[0]
-            resp = await self._client.get(f"{base}/health", timeout=5)
+            resp = await self._client.get(f"{_api_root(self.base_url)}/health", timeout=5)
             return resp.json()
         except httpx.ConnectError:
             raise MemgraphConnectionError("Cannot reach Memgraph server at " + self.base_url)
@@ -146,9 +149,10 @@ class AsyncMemgraphClient:
             raise MemgraphConnectionError(f"Health check failed: {e}")
 
     async def add(self, text: str, user_id: str) -> Dict:
-        """Add a memory via the /ingest endpoint (event pipeline).
+        """Add a memory via the /ingest endpoint (extraction pipeline).
 
-        Note: Events go through async processing. Use remember() for immediate searchability.
+        Beliefs are extracted in the background (~5-10s). Use remember() for
+        immediate searchability.
         """
         data = {
             "user_id": user_id,
@@ -166,15 +170,9 @@ class AsyncMemgraphClient:
             "decision": "work", "architecture": "tech", "bug_fix": "tech",
             "preference": "general", "general": "general",
         }
-        import hashlib
-        short = text[:60].strip().lower()
-        clean = "".join(c if c.isalnum() or c == " " else "" for c in short)
-        text_hash = hashlib.md5(text.encode()).hexdigest()[:6]
-        belief_key = f"{category}_{'_'.join(clean.split()[:5])}_{text_hash}"
-
         payload = {
             "subject_id": user_id,
-            "key": belief_key,
+            "key": _remember_key(text, category),
             "value": text,
             "confidence": confidence,
             "belief_type": "fact" if category in ("bug_fix", "architecture") else "belief",
@@ -188,52 +186,39 @@ class AsyncMemgraphClient:
     async def search(self, query: str, user_id: str, agent_id: str = None, limit: int = 10) -> Dict[str, Any]:
         """Search memories relevant to a query. Returns scored results.
 
-        Uses the v2 context endpoint which returns JSON with scored memories.
-
         Returns:
             Dict with 'results' list, each containing content, score, metadata.
-        """
-        # Build v2 URL from base URL
-        base = self.base_url.rstrip("/")
-        if "/v1" in base:
-            v2_url = base.replace("/v1", "/v2") + "/context"
-        elif "/v2" in base:
-            v2_url = base + "/context"
-        else:
-            v2_url = base + "/v2/context"
 
+        Raises MemgraphAPIError / MemgraphConnectionError on failure — an
+        outage never looks like "no memories".
+        """
         payload = {"query": query, "user_id": user_id}
         if agent_id:
             payload["agent_id"] = agent_id
 
         try:
-            resp = await self._client.post(v2_url, json=payload, timeout=self.timeout)
-            resp.raise_for_status()
-            data = resp.json()
-
-            memories = data.get("memories", [])
-            results = []
-            for m in memories[:limit]:
-                results.append({
-                    "content": m.get("content", ""),
-                    "score": m.get("score", 0),
-                    "metadata": m.get("metadata", {}),
-                    "type": m.get("type", "belief"),
-                })
+            data = (await self._request("POST", "/context", api="v2", json=payload)).json()
+        except MemgraphValidationError as e:
+            if e.status_code != 404:
+                raise
+            # Server without the v2 API: list the user's beliefs instead.
+            beliefs = await self.get_beliefs(user_id=user_id, limit=limit)
+            items = beliefs if isinstance(beliefs, list) else beliefs.get("items", [])
+            results = [{"content": b.get("value", ""), "score": 1.0, "metadata": b, "type": "belief"}
+                       for b in items[:limit]]
             return {"results": results, "total": len(results)}
 
-        except Exception:
-            try:
-                beliefs = await self.get_beliefs(user_id=user_id, limit=limit)
-                items = beliefs if isinstance(beliefs, list) else beliefs.get("items", [])
-                results = [
-                    {"content": f"{b.get('key','')}: {b.get('value','')}", "score": 1.0, "metadata": b}
-                    for b in items[:limit]
-                ]
-                return {"results": results, "total": len(results)}
-            except Exception:
-                return {"results": [], "total": 0}
-
+        results = [
+            {
+                "id": m.get("id"),
+                "content": _memory_text(m),
+                "score": m.get("score", 0),
+                "metadata": m.get("metadata", {}),
+                "type": m.get("type", "belief"),
+            }
+            for m in data.get("memories", [])[:limit]
+        ]
+        return {"results": results, "total": len(results)}
 
     async def get_beliefs(self, user_id: str, limit: int = 50, cursor: str = None) -> Dict:
         """Fetch beliefs for a user with cursor-based pagination."""
@@ -300,3 +285,96 @@ class AsyncMemgraphClient:
         """List available benchmark scenarios."""
         resp = await self._request("GET", "/benchmark/scenarios")
         return resp.json().get("scenarios", [])
+
+    # ------------------------------------------------------------------
+    # Forget (user data deletion)
+    # ------------------------------------------------------------------
+
+    async def forget(self, belief_id: str) -> Dict[str, Any]:
+        """Delete a specific belief by ID."""
+        resp = await self._request("DELETE", f"/beliefs/{belief_id}")
+        return resp.json()
+
+    async def forget_all(self, user_id: str, domain: Optional[str] = None, soft: bool = False) -> Dict[str, Any]:
+        """Delete all beliefs for a user (optionally only one domain)."""
+        params: Dict[str, Any] = {"subject_id": user_id, "soft": str(soft).lower()}
+        if domain:
+            params["domain"] = domain
+        resp = await self._request("DELETE", "/beliefs", params=params)
+        return resp.json()
+
+    # ------------------------------------------------------------------
+    # Cognitive Sidecar
+    # ------------------------------------------------------------------
+
+    async def sidecar_pre_flight(self, message: str, user_id: str, thread_id: str = None,
+                                 agent_id: str = "sdk_sidecar", token_budget: int = 4000) -> Dict[str, Any]:
+        """Memories + lessons from past attempts to inject before an LLM call."""
+        payload: Dict[str, Any] = {
+            "user_id": user_id, "agent_id": agent_id, "message": message,
+            "token_budget": token_budget, "include_profile": True, "include_prospective": True,
+        }
+        if thread_id:
+            payload["thread_id"] = thread_id
+        resp = await self._request("POST", "/sidecar/pre-flight", json=payload)
+        return resp.json()
+
+    async def sidecar_post_flight(self, messages: List[Dict[str, str]], user_id: str,
+                                  thread_id: str = None, agent_id: str = "sdk_sidecar") -> Dict[str, Any]:
+        """Learn from a finished exchange. Returns immediately; learning runs server-side."""
+        payload: Dict[str, Any] = {"user_id": user_id, "agent_id": agent_id, "messages": messages}
+        if thread_id:
+            payload["thread_id"] = thread_id
+        resp = await self._request("POST", "/sidecar/post-flight", json=payload)
+        return resp.json()
+
+    # ------------------------------------------------------------------
+    # v2 — context graph, decisions, outcomes
+    # ------------------------------------------------------------------
+
+    async def get_context_graph(self, query: str, user_id: Optional[str] = None, agent_id: Optional[str] = None,
+                                include_decisions: bool = True, include_graph: bool = True,
+                                create_snapshot: bool = False) -> Dict[str, Any]:
+        """Memories, entities, relationships and similar past decisions for a query."""
+        payload: Dict[str, Any] = {
+            "query": query, "include_decisions": include_decisions,
+            "include_graph": include_graph, "create_snapshot": create_snapshot,
+        }
+        if user_id:
+            payload["user_id"] = user_id
+        if agent_id:
+            payload["agent_id"] = agent_id
+        resp = await self._request("POST", "/context", api="v2", json=payload)
+        return resp.json()
+
+    async def record_decision(self, goal: str, *, outcome: Optional[str] = None,
+                              outcome_assessment: Optional[str] = None,
+                              beliefs_used: Optional[List[str]] = None,
+                              reasoning_steps: Optional[List[Dict]] = None,
+                              tools_used: Optional[List[Dict]] = None,
+                              confidence: Optional[float] = None,
+                              agent_id: Optional[str] = None, user_id: Optional[str] = None,
+                              create_snapshot: bool = False) -> Dict[str, Any]:
+        """Record an agent decision (see MemgraphClient.record_decision)."""
+        payload: Dict[str, Any] = {"goal": goal, "create_snapshot": create_snapshot}
+        for name, value in (("outcome", outcome), ("outcome_assessment", outcome_assessment),
+                            ("beliefs_used", beliefs_used), ("reasoning_steps", reasoning_steps),
+                            ("tools_used", tools_used), ("confidence", confidence),
+                            ("agent_id", agent_id), ("user_id", user_id)):
+            if value is not None:
+                payload[name] = value
+        resp = await self._request("POST", "/decisions", api="v2", json=payload)
+        return resp.json()
+
+    async def record_outcome(self, decision_id: str, outcome: str, feedback: Optional[str] = None) -> Dict[str, Any]:
+        """Report how a decision turned out (SUCCESS / FAILURE / PARTIAL)."""
+        payload: Dict[str, Any] = {"decision_id": decision_id, "outcome": outcome.upper()}
+        if feedback:
+            payload["feedback"] = feedback
+        resp = await self._request("POST", "/outcomes/record", api="v2", json=payload)
+        return resp.json()
+
+    async def delete_decision(self, decision_id: str) -> Dict[str, Any]:
+        """Delete a decision and its context snapshot."""
+        resp = await self._request("DELETE", f"/decisions/{decision_id}", api="v2")
+        return resp.json()

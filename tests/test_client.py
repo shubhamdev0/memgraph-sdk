@@ -2,6 +2,8 @@
 import unittest
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from memgraph_sdk import MemgraphClient, __version__
 from memgraph_sdk.exceptions import (
     MemgraphAPIError,
@@ -47,8 +49,8 @@ class TestClientInit(unittest.TestCase):
 class TestClientMethods(unittest.TestCase):
     """Test SDK methods with properly mocked session."""
 
-    def _make_client(self, tenant_id="test-tenant-uuid"):
-        client = MemgraphClient(api_key="mg_k", tenant_id=tenant_id)
+    def _make_client(self, tenant_id="test-tenant-uuid", max_retries=3):
+        client = MemgraphClient(api_key="mg_k", tenant_id=tenant_id, max_retries=max_retries)
         return client
 
     def _mock_response(self, json_data, status_code=200):
@@ -87,17 +89,76 @@ class TestClientMethods(unittest.TestCase):
     def test_search_with_tenant_id(self):
         client = self._make_client(tenant_id="my-tenant")
         mock_resp = self._mock_response({"memories": []})
-        with patch.object(client._session, "post", return_value=mock_resp):
+        with patch.object(client._session, "request", return_value=mock_resp) as mock_req:
             result = client.search("query", user_id="u1")
             assert result == {"results": [], "total": 0}
+            assert mock_req.call_args.args[1].endswith("/v2/context")
 
     def test_search_without_tenant_id(self):
         """When tenant_id is None, search still works."""
         client = self._make_client(tenant_id=None)
         mock_resp = self._mock_response({"memories": []})
-        with patch.object(client._session, "post", return_value=mock_resp):
+        with patch.object(client._session, "request", return_value=mock_resp):
             result = client.search("query", user_id="u1")
             assert result == {"results": [], "total": 0}
+
+    def test_search_raises_on_server_error(self):
+        """Bug 8: a 500 must raise, not look like 'no memories'."""
+        client = self._make_client(max_retries=1)
+        err = self._mock_response({"detail": "boom"}, status_code=500)
+        with patch.object(client._session, "request", return_value=err):
+            with pytest.raises(MemgraphAPIError):
+                client.search("query", user_id="u1")
+
+    def test_search_falls_back_on_404_only(self):
+        """Servers without /v2 (404) fall back to listing beliefs."""
+        client = self._make_client(max_retries=1)
+        not_found = self._mock_response({"detail": "Not Found"}, status_code=404)
+        beliefs = self._mock_response({"items": [{"id": "b1", "key": "k", "value": "likes tea"}]})
+        with patch.object(client._session, "request", side_effect=[not_found, beliefs]):
+            result = client.search("query", user_id="u1")
+        assert result["results"][0]["content"] == "likes tea"
+
+    def test_search_strips_generated_key_prefix(self):
+        """Bug 10: old servers return 'general_<words>_<hash>: text'."""
+        client = self._make_client()
+        key = "general_customer_prefers_dark_mode_and_81845f"
+        mock_resp = self._mock_response({"memories": [{
+            "id": "b1", "content": f"{key}: Customer prefers dark mode", "score": 0.9, "metadata": {"key": key},
+        }]})
+        with patch.object(client._session, "request", return_value=mock_resp):
+            result = client.search("dark mode", user_id="u1")
+        assert result["results"][0]["content"] == "Customer prefers dark mode"
+        assert result["results"][0]["id"] == "b1"
+
+    def test_v2_calls_are_thread_safe(self):
+        """Bug 7: _v2_request swapped self.base_url, so parallel v1 calls hit /v2."""
+        import threading
+        import time
+        client = self._make_client()
+        seen = []
+        lock = threading.Lock()
+
+        def fake_request(method, url, **kwargs):
+            time.sleep(0.01)  # network latency — this is when the old swap leaked
+            with lock:
+                seen.append(url)
+            return self._mock_response({"items": [], "memories": []})
+
+        with patch.object(client._session, "request", side_effect=fake_request):
+            threads = []
+            for _ in range(20):
+                threads.append(threading.Thread(target=client.list_decisions))
+                threads.append(threading.Thread(target=client.get_beliefs, args=("u1",)))
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join()
+            client.get_beliefs("u1")  # after the burst, v1 must still be v1
+        assert len(seen) == 41
+        assert sum("/v1/beliefs" in u for u in seen) == 21, [u for u in seen if "beliefs" in u and "/v1/" not in u]
+        assert sum("/v2/decisions" in u for u in seen) == 20
+        assert client.base_url.endswith("/v1")
 
     def test_remember_without_tenant_id(self):
         """When tenant_id is None, beliefs payload should NOT include tenant_id."""
@@ -474,14 +535,9 @@ class TestCloudVsOnPremURL(unittest.TestCase):
             ("contradictions", (), {}),
         ]:
             mock_resp = self._mock_ok({"ok": True, "beliefs": [], "cursor": None, "memories": []})
-            # search() calls _session.post directly (v2 endpoint); others use _request → _session.request
-            with patch.object(client._session, "request", return_value=mock_resp) as mock_req, \
-                 patch.object(client._session, "post", return_value=mock_resp) as mock_post:
+            with patch.object(client._session, "request", return_value=mock_resp) as mock_req:
                 getattr(client, method_name)(*call_args, **call_kwargs)
-                if method_name == "search":
-                    req_url = mock_post.call_args[0][0] if mock_post.call_args else ""
-                else:
-                    req_url = mock_req.call_args.args[1] if mock_req.call_args.args else mock_req.call_args[0][1]
+                req_url = mock_req.call_args.args[1]
                 base_host = self.ON_PREM_URL.split("/v1")[0]
                 assert base_host in req_url, \
                     f"{method_name}() should hit on-prem URL, got: {req_url}"
@@ -498,6 +554,57 @@ class TestCloudVsOnPremURL(unittest.TestCase):
         mock_resp.text = str(json_data)
         mock_resp.headers = {}
         return mock_resp
+
+
+class TestAsyncClientBehaviour(unittest.TestCase):
+    """Async client: same error semantics and URLs as the sync client."""
+
+    def _client(self, handler):
+        import httpx
+        from memgraph_sdk import AsyncMemgraphClient
+        client = AsyncMemgraphClient(api_key="mg_k", base_url="http://srv:8001/v1", max_retries=1)
+        client._client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        return client
+
+    def test_search_raises_on_server_error(self):
+        import asyncio
+        import httpx
+        client = self._client(lambda req: httpx.Response(500, json={"detail": "boom"}))
+        with pytest.raises(MemgraphAPIError):
+            asyncio.run(client.search("q", user_id="u1"))
+
+    def test_search_hits_v2_and_cleans_content(self):
+        import asyncio
+        import httpx
+        seen = []
+        key = "general_likes_tea_abc123"
+
+        def handler(req):
+            seen.append(str(req.url))
+            return httpx.Response(200, json={"memories": [
+                {"id": "b1", "content": f"{key}: likes tea", "score": 0.9, "metadata": {"key": key}},
+            ]})
+
+        result = asyncio.run(self._client(handler).search("tea", user_id="u1"))
+        assert seen == ["http://srv:8001/v2/context"]
+        assert result["results"][0] == {
+            "id": "b1", "content": "likes tea", "score": 0.9, "metadata": {"key": key}, "type": "belief",
+        }
+
+    def test_record_outcome_and_forget_all_urls(self):
+        import asyncio
+        import httpx
+        seen = []
+
+        def handler(req):
+            seen.append((req.method, str(req.url)))
+            return httpx.Response(200, json={})
+
+        client = self._client(handler)
+        asyncio.run(client.record_outcome("d1", "failure", feedback="too late"))
+        asyncio.run(client.forget_all("u1"))
+        assert seen[0] == ("POST", "http://srv:8001/v2/outcomes/record")
+        assert seen[1][0] == "DELETE" and seen[1][1].startswith("http://srv:8001/v1/beliefs?subject_id=u1")
 
 
 if __name__ == "__main__":

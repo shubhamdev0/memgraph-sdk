@@ -188,7 +188,7 @@ def remember_cmd(text: str, category: str = "general"):
 
     config = load_config()
     if not config:
-        print("Error: Not initialized. Run 'memgraph init' first.")
+        print("Error: Not configured. Run 'memgraph setup <api_key>' or export MEMGRAPH_API_KEY.")
         return
 
     try:
@@ -227,7 +227,7 @@ def recall_cmd(query: str):
 
     config = load_config()
     if not config:
-        print("Error: Not initialized. Run 'memgraph init' first.")
+        print("Error: Not configured. Run 'memgraph setup <api_key>' or export MEMGRAPH_API_KEY.")
         return
 
     headers = {"X-API-KEY": config.get("api_key", "")}
@@ -295,7 +295,7 @@ def status_cmd():
     """Check Memgraph connection status."""
     config = load_config()
     if not config:
-        print("❌ Not initialized. Run 'memgraph init' first.")
+        print("❌ Not configured. Run 'memgraph setup <api_key>' or export MEMGRAPH_API_KEY.")
         return
 
     print(f"📡 API URL: {config['api_url']}")
@@ -318,24 +318,31 @@ def status_cmd():
 
 
 def load_config():
-    """Load config from .memgraph.env file."""
+    """Load config: MEMGRAPH_* environment variables win over .memgraph.env.
+
+    With MEMGRAPH_API_KEY exported, no config file is needed at all.
+    Returns None when neither is available.
+    """
     config_path = Path(CONFIG_FILE)
-    if not config_path.exists():
+    config = {}
+    if config_path.exists():
+        with open(config_path) as f:
+            for line in f:
+                line = line.strip()
+                if "=" in line and not line.startswith("#"):
+                    key, value = line.split("=", 1)
+                    key = key.strip().lower().replace("memgraph_", "")
+                    config[key] = value.strip()
+
+    api_key = os.getenv("MEMGRAPH_API_KEY") or config.get("api_key")
+    if not config_path.exists() and not api_key:
         return None
 
-    config = {}
-    with open(config_path) as f:
-        for line in f:
-            line = line.strip()
-            if "=" in line and not line.startswith("#"):
-                key, value = line.split("=", 1)
-                key = key.strip().lower().replace("memgraph_", "")
-                config[key] = value.strip()
-
+    default_url = LOCAL_URL if config_path.exists() else CLOUD_URL
     return {
-        "api_url": config.get("api_url", LOCAL_URL),
-        "tenant_id": config.get("tenant_id"),
-        "api_key": config.get("api_key")
+        "api_url": os.getenv("MEMGRAPH_API_URL") or config.get("api_url") or default_url,
+        "tenant_id": os.getenv("MEMGRAPH_TENANT_ID") or config.get("tenant_id"),
+        "api_key": api_key,
     }
 
 

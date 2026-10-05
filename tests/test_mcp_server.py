@@ -81,7 +81,7 @@ class TestMCPServerModule(unittest.TestCase):
 
     @patch.dict(os.environ, {"MEMGRAPH_API_KEY": "mg_test_key_123"})
     def test_mcp_tools_defined(self):
-        """MCP server should define 3 tools: remember, search, profile."""
+        """MCP server tools: remember, search, forget, think, profile."""
         if "memgraph_sdk.mcp" in sys.modules:
             del sys.modules["memgraph_sdk.mcp"]
 
@@ -91,7 +91,9 @@ class TestMCPServerModule(unittest.TestCase):
             assert "memgraph_remember" in tool_names
             assert "memgraph_search" in tool_names
             assert "memgraph_profile" in tool_names
-            assert len(tool_names) == 3
+            assert "memgraph_forget" in tool_names
+            assert "memgraph_think" in tool_names
+            assert len(tool_names) == 5
         except SystemExit:
             self.fail("MCP module exited unexpectedly")
         finally:

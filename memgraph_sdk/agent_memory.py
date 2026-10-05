@@ -66,6 +66,7 @@ class DecisionCapture:
     _outcome: Optional[str] = None
     _outcome_assessment: Optional[str] = None
     _start_time: float = field(default_factory=time.time)
+    decision_id: Optional[str] = None  # Set once stored (background thread)
 
     def step(
         self,
@@ -173,7 +174,10 @@ class MemgraphMemory:
             client: MemgraphClient instance
             user_id: Default user ID for scoping
             agent_id: Agent identifier
-            auto_feedback: Whether decision outcomes automatically update belief confidence
+            auto_feedback: Deprecated, ignored. Outcomes always feed back
+                server-side: recording a SUCCESS/FAILURE adjusts the confidence
+                of the beliefs used and surfaces the result as a lesson for
+                similar future tasks.
         """
         self.client = client
         self.user_id = user_id
@@ -276,48 +280,31 @@ class MemgraphMemory:
             create_snapshot=True,
         )
 
+    def record_outcome(self, decision_id: str, outcome: str, feedback: Optional[str] = None) -> Dict[str, Any]:
+        """Report a decision's outcome once you know it (e.g. a refund later failed)."""
+        return self.client.record_outcome(decision_id, outcome, feedback)
+
     def _store_decision_async(self, decision: DecisionCapture):
-        """Store a decision in a background thread."""
+        """Store a decision in a background thread.
+
+        The server applies the outcome immediately: a FAILURE lowers the
+        confidence of the beliefs used and is shown as a lesson the next
+        time a similar goal comes up.
+        """
         def _store():
             try:
                 payload = decision.to_payload()
                 result = self.client.record_decision(**payload)
+                decision.decision_id = result.get("id")
                 logger.info(
                     "Decision captured: goal='%s' outcome=%s decision_id=%s",
-                    decision.goal[:50], decision._outcome, result.get("id"),
+                    decision.goal[:50], decision._outcome, decision.decision_id,
                 )
-
-                # Decision feedback loop: if outcome is FAILURE and beliefs were used,
-                # flag those beliefs for confidence review
-                if self.auto_feedback and decision._outcome == "FAILURE" and decision._beliefs_used:
-                    self._apply_decision_feedback(decision)
-
             except Exception as e:
                 logger.warning("Failed to store decision: %s", e)
 
         thread = threading.Thread(target=_store, daemon=True)
         thread.start()
-
-    def _apply_decision_feedback(self, decision: DecisionCapture):
-        """
-        Decision feedback loop: when a decision FAILS, reduce confidence
-        of beliefs that were consulted. This creates self-learning agents.
-
-        Decision → Outcome → Belief Update
-        """
-        try:
-            # For failed decisions, the beliefs used may have been wrong
-            # We don't want to aggressively downgrade, just flag for review
-            logger.info(
-                "Decision feedback: FAILURE with %d beliefs used, flagging for review",
-                len(decision._beliefs_used),
-            )
-            # The actual confidence update happens server-side via the contradiction
-            # detection engine in the dreaming worker. We just record the decision
-            # with outcome=FAILURE and the beliefs_used, which the analytics
-            # endpoint can surface.
-        except Exception as e:
-            logger.warning("Decision feedback loop failed: %s", e)
 
 
 def _safe_serialize(obj: Any) -> Any:

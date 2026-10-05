@@ -24,7 +24,7 @@ export MEMGRAPH_API_KEY=mg_your_key_here   # Get from memgraph.ai
 | [langchain_integration.py](integrations/langchain_integration.py) | LangChain memory adapter | `langchain` |
 | [crewai_integration.py](integrations/crewai_integration.py) | CrewAI shared agent memory | `crewai` |
 | [llamaindex_integration.py](integrations/llamaindex_integration.py) | LlamaIndex memory integration | `llama-index` |
-| [mcp_server.py](integrations/mcp_server.py) | MCP server for Claude/Cursor | None (built-in) |
+| MCP server for Claude/Cursor | Built in: `pip install "memgraph-sdk[mcp]"` then `memgraph setup --key mg_...` (or `python -m memgraph_sdk.mcp`) | `mcp` |
 
 ## Quick Test
 

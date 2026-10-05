@@ -29,9 +29,11 @@ Not a vector store with a wrapper. A three-layer cognitive engine that distills 
 - [Authentication](#authentication)
 - [Core Methods](#core-methods)
 - [Decisions & Reasoning Traces](#decisions--reasoning-traces)
+- [Learn From Mistakes](#learn-from-mistakes)
 - [Entities & Knowledge Graph](#entities--knowledge-graph)
 - [Cognitive Sidecar (Always-On Memory)](#cognitive-sidecar-always-on-memory)
 - [Memory Intelligence](#memory-intelligence)
+- [Deleting User Data](#deleting-user-data)
 - [Error Handling](#error-handling)
 - [Async Client](#async-client)
 - [MCP Server (Claude / Cursor)](#mcp-server-claude--cursor)
@@ -63,13 +65,8 @@ pip install "memgraph-sdk[all]"     # Everything
 **Step 1: Get your API key** — sign up at [memgraph.ai](https://memgraph.ai), or via CLI:
 
 ```bash
-# Cloud (recommended)
 pip install memgraph-sdk
-memgraph setup --key mg_your_api_key
-
-# Self-hosted
-docker compose up -d              # Start PostgreSQL + Memgraph
-memgraph setup --key mg_your_key  # Point to your server
+export MEMGRAPH_API_KEY=mg_your_api_key
 ```
 
 > Your API key starts with `mg_`. Find it in Settings > API Keys after signing up.
@@ -128,7 +125,7 @@ mg.remember(
 
 ### `add()` — Async extraction pipeline
 
-Sends text through the background extraction pipeline (entity extraction, belief crystallization, episode grouping). **May take 5-10 seconds before results are searchable.**
+Sends raw text through the extraction pipeline, which pulls out facts and preferences as beliefs in the background. **Results are searchable after ~5-10 seconds.**
 
 ```python
 mg.add("Full conversation text here", user_id="alice")
@@ -146,13 +143,18 @@ result = mg.search("UI preferences", user_id="alice")
 # Returns:
 # {
 #   "results": [
-#     {"content": "User prefers dark mode", "score": 0.76, "metadata": {"key": "...", "domain": "general"}},
+#     {"id": "6f1c…", "content": "User prefers dark mode", "score": 0.76,
+#      "metadata": {"key": "...", "value": "User prefers dark mode", "domain": "general"}},
 #   ],
 #   "total": 1
 # }
 ```
 
 Optional parameters: `agent_id` (scope to a specific agent), `limit` (default 10).
+
+Remembering an updated fact replaces the old one: after `remember("I moved to Pune")`, a search for where Alice lives returns Pune, not the old city. The old value stays in `belief_history()` and only appears in results marked `[PREVIOUSLY]`.
+
+If the server is unreachable or returns an error, `search()` raises (see [Error Handling](#error-handling)) — an outage never looks like "no memories".
 
 ### `get_beliefs()` — List all beliefs
 
@@ -188,7 +190,7 @@ with MemgraphClient(api_key="mg_your_key") as mg:
 
 ## Decisions & Reasoning Traces
 
-Record, inspect, and debug AI agent decisions. This is Memgraph's unique feature — no other memory system tracks *why* your agent made a decision.
+Record, inspect, and debug AI agent decisions: Memgraph AI keeps *why* your agent did something, not just what it remembered.
 
 ### Record a decision
 
@@ -204,7 +206,7 @@ decision = mg.record_decision(
         {"tool_name": "benchmark_runner", "tool_input": "pg vs mongo", "tool_output": "pg wins"},
         {"tool_name": "cost_calculator", "tool_input": "3 options", "tool_output": "$50/mo"},
     ],
-    beliefs_used=["PostgreSQL is our production DB", "Team has PostgreSQL expertise"],
+    beliefs_used=[r["id"] for r in mg.search("our database", user_id="alice")["results"]],
     confidence=0.92,
     outcome="SUCCESS",           # SUCCESS, FAILURE, PARTIAL, UNKNOWN, REVERTED
     outcome_assessment="PostgreSQL selected, 3x faster than MongoDB for our workload",
@@ -244,7 +246,34 @@ explanation = mg.explain_decision(decision["id"])
 
 # List all decisions (with optional filters)
 all_decisions = mg.list_decisions(agent_id="my-agent", outcome="FAILURE", limit=20)
+
+# Delete a decision
+mg.delete_decision(decision["id"])
 ```
+
+`beliefs_used` takes belief **IDs** (the `id` of `search()` results). When the decision has an outcome, Memgraph AI adjusts those beliefs' confidence: down on `FAILURE`, slightly up on `SUCCESS`.
+
+## Learn From Mistakes
+
+Record what your agent did and how it turned out. The next time a similar task comes in, the past attempt — and why it failed — is part of the context.
+
+```python
+# 1. The agent acts; you learn later that it went wrong
+d = mg.record_decision(goal="Refund order #4411 bought 45 days ago", user_id="alice")
+mg.record_outcome(d["id"], "FAILURE", feedback="Refunds are only allowed within 30 days")
+
+# 2. A similar request arrives
+ctx = mg.sidecar_pre_flight("Please refund my order #5520 from 50 days ago", user_id="alice")
+print(ctx["memory_context"])
+# LESSONS FROM PAST ATTEMPTS AT SIMILAR TASKS:
+#   - "Refund order #4411 bought 45 days ago" → FAILED: Refunds are only allowed within 30 days
+#   Do not repeat an approach that FAILED; adjust it using the reason given.
+
+# Same data from the v2 API:
+mg.get_context_graph("refund order bought 50 days ago", user_id="alice")["decisions"]
+```
+
+Past decisions are matched by how similar their goal is to the current message, and only the user's own decisions (plus agent-level ones recorded without a `user_id`) are shown.
 
 ## Entities & Knowledge Graph
 
@@ -296,7 +325,9 @@ context = mg.sidecar_pre_flight(
     user_id="alice",
     token_budget=4000,            # max tokens for injected context
 )
-# → Returns memory context to inject as system message
+context["memory_context"]   # text block to add as a system message
+context["system_messages"]  # or: a ready-made messages list
+context["past_decisions"]   # similar earlier attempts and their outcomes
 
 # Post-flight: extract learnable signals from the conversation
 mg.sidecar_post_flight(
@@ -306,7 +337,8 @@ mg.sidecar_post_flight(
     ],
     user_id="alice",
 )
-# → Learning happens in background, returns immediately
+# → {"status": "queued", ...} — returns immediately, learns in the background.
+#   Pass wait=True to learn synchronously and get the belief counts back.
 
 # Process: combined pre-flight + post-flight in one call (recommended)
 result = mg.sidecar_process(
@@ -341,8 +373,22 @@ mg.contradictions()
 mg.evaluate("What is our database?", user_id="alice")
 
 # Run a benchmark scenario
-mg.benchmark("contradiction_detection")
+mg.benchmark("contradiction_storm")
+# Scenarios: contradiction_storm, tenet_violation, retrieval_accuracy,
+#            locomo, deep_memory_retrieval  (mg.benchmark_scenarios() lists them)
 ```
+
+## Deleting User Data
+
+When one of your users asks to be forgotten:
+
+```python
+mg.forget_all(user_id="alice")                       # every belief for the user
+for d in mg.list_decisions(user_id="alice", limit=200):
+    mg.delete_decision(d["id"])                       # their decision records
+```
+
+`forget_all(user_id, soft=True)` deactivates instead of deleting, if you need an audit trail.
 
 ## Error Handling
 
@@ -351,7 +397,7 @@ from memgraph_sdk.exceptions import (
     MemgraphAuthError,         # 401/403 — bad API key
     MemgraphConnectionError,   # Network error / timeout
     MemgraphRateLimitError,    # 429 — e.retry_after has wait time
-    MemgraphValidationError,   # 422 — bad request parameters
+    MemgraphValidationError,   # 4xx — bad request (404, 409, 422 …)
     MemgraphAPIError,          # 5xx — server error (auto-retried)
 )
 
@@ -375,6 +421,8 @@ async with AsyncMemgraphClient(api_key="mg_your_api_key") as mg:
     result = await mg.search("preferences", user_id="alice")
 ```
 
+Available: `add`, `remember`, `search`, `get_beliefs`, `forget`, `forget_all`, `sidecar_pre_flight`, `sidecar_post_flight`, `get_context_graph`, `record_decision`, `record_outcome`, `delete_decision`, plus the memory-intelligence calls (`health`, `contradictions`, `evaluate`, `mcis`, `benchmark`).
+
 Requires: `pip install "memgraph-sdk[async]"`
 
 ## MCP Server (Claude / Cursor)
@@ -382,6 +430,7 @@ Requires: `pip install "memgraph-sdk[async]"`
 Give your AI IDE persistent memory with one command:
 
 ```bash
+pip install "memgraph-sdk[mcp]"
 memgraph setup --key mg_your_api_key
 ```
 
@@ -393,11 +442,18 @@ Auto-detects Cursor, Claude Desktop, VS Code. Or configure manually:
     "memgraph": {
       "command": "python3",
       "args": ["-m", "memgraph_sdk.mcp"],
-      "env": { "MEMGRAPH_API_KEY": "mg_your_api_key" }
+      "env": {
+        "MEMGRAPH_API_KEY": "mg_your_api_key",
+        "MEMGRAPH_AGENT_USER_ID": "your-name"
+      }
     }
   }
 }
 ```
+
+Tools: `memgraph_search`, `memgraph_remember`, `memgraph_forget` (delete a wrong memory by the `id` from a search result), `memgraph_think` (recall + learn from the conversation in one call) and `memgraph_profile`.
+
+`MEMGRAPH_AGENT_USER_ID` decides whose memory the IDE reads and writes (default `ai_agent`). Everyone on your team who uses the same API key with the default shares one memory — give each person their own value.
 
 ## CLI
 
@@ -407,6 +463,8 @@ memgraph remember "We chose PostgreSQL"  # Store a memory
 memgraph recall "database choice"        # Search memories
 memgraph status                          # Check connection
 ```
+
+The CLI reads `MEMGRAPH_API_KEY` / `MEMGRAPH_API_URL` from the environment, so `export MEMGRAPH_API_KEY=mg_...` is enough — no setup file needed. Environment variables override `.memgraph.env`.
 
 ## Configuration
 
@@ -459,13 +517,9 @@ mg = MemgraphClient(api_key=os.environ["MEMGRAPH_API_KEY"])
 
 ### Rate limits
 
-| Tier | Requests/min | Beliefs | Entities |
-|------|-------------|---------|----------|
-| Free | 120 | 1,000 | 100 |
-| Pro | 600 | 50,000 | 5,000 |
-| Enterprise | Unlimited | Unlimited | Unlimited |
+Each API key can make **120 requests per minute**. Need more? Email hello@memgraph.ai.
 
-The SDK auto-retries on 429 with exponential backoff. Catch `MemgraphRateLimitError` for custom handling.
+Over the limit the API returns `429` with a `Retry-After` header; the SDK waits and retries automatically. Catch `MemgraphRateLimitError` for custom handling.
 
 ### Input validation
 

@@ -1,5 +1,7 @@
+import hashlib
 import logging
 import os
+import re
 import time
 from typing import Any, Dict, List, Optional
 
@@ -14,6 +16,40 @@ from memgraph_sdk.exceptions import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Keys remember() generates: "<category>_<first words>_<6 hex>".
+_GENERATED_KEY = re.compile(r"^(general|decision|architecture|bug_fix|preference)_\w*_[0-9a-f]{6}$", re.UNICODE)
+
+
+def _api_root(base_url: str) -> str:
+    """'https://api.memgraph.ai/v1' -> 'https://api.memgraph.ai'."""
+    base = base_url.rstrip("/")
+    for suffix in ("/v1", "/v2"):
+        if base.endswith(suffix):
+            return base[: -len(suffix)]
+    return base
+
+
+def _memory_text(memory: Dict[str, Any]) -> str:
+    """Clean text for a search result.
+
+    Servers before 0.8.3 return remember() beliefs as
+    "general_<words>_<hash>: <text>"; show just the text.
+    """
+    content = memory.get("content", "") or ""
+    key = (memory.get("metadata") or {}).get("key") or ""
+    # Only rewrite the legacy shape; keep markers like "[PREVIOUSLY] …".
+    if key and _GENERATED_KEY.match(key) and content.startswith(f"{key}: "):
+        return content[len(key) + 2:]
+    return content
+
+
+def _remember_key(text: str, category: str) -> str:
+    short = text[:60].strip().lower()
+    clean = "".join(c if c.isalnum() or c == " " else "" for c in short)
+    # Short hash suffix avoids key collisions for similar text
+    text_hash = hashlib.md5(text.encode()).hexdigest()[:6]
+    return f"{category}_{'_'.join(clean.split()[:5])}_{text_hash}"
 
 
 class MemgraphClient:
@@ -67,10 +103,15 @@ class MemgraphClient:
     def __exit__(self, *args):
         self.close()
 
-    def _request(self, method: str, path: str, **kwargs: Any) -> requests.Response:
+    def _url(self, path: str, api: str = "v1") -> str:
+        # Built per call from base_url — never mutate shared state, the client
+        # is used from many threads at once.
+        return f"{_api_root(self.base_url)}/{api}{path}"
+
+    def _request(self, method: str, path: str, *, api: str = "v1", **kwargs: Any) -> requests.Response:
         """Make an HTTP request with retries and proper error handling."""
         kwargs.setdefault("timeout", self.timeout)
-        url = f"{self.base_url}{path}"
+        url = self._url(path, api)
 
         last_exc = None
         for attempt in range(self.max_retries):
@@ -147,9 +188,8 @@ class MemgraphClient:
         Raises MemgraphConnectionError if the server is unreachable.
         """
         try:
-            base = self.base_url.rsplit("/v1", 1)[0]
             health = self._session.get(
-                f"{base}/health", timeout=5
+                f"{_api_root(self.base_url)}/health", timeout=5
             ).json()
         except requests.ConnectionError:
             raise MemgraphConnectionError(
@@ -181,9 +221,8 @@ class MemgraphClient:
     def add(self, text: str, user_id: str) -> Dict:
         """Add a memory via the /ingest endpoint (async extraction pipeline).
 
-        The text is queued for background extraction — beliefs, entities, and
-        episodes are created asynchronously.  This means results may NOT be
-        immediately searchable.  Allow ~5-10 seconds for extraction to complete.
+        The server extracts beliefs from the text in the background, so they
+        are not searchable immediately — allow ~5-10 seconds.
 
         For **immediate** searchability, use ``remember()`` instead, which
         creates a belief directly with a vector embedding.
@@ -210,16 +249,9 @@ class MemgraphClient:
             "decision": "work", "architecture": "tech", "bug_fix": "tech",
             "preference": "general", "general": "general",
         }
-        import hashlib
-        short = text[:60].strip().lower()
-        clean = "".join(c if c.isalnum() or c == " " else "" for c in short)
-        # Add short hash suffix to avoid key collisions for similar text
-        text_hash = hashlib.md5(text.encode()).hexdigest()[:6]
-        belief_key = f"{category}_{'_'.join(clean.split()[:5])}_{text_hash}"
-
         payload = {
             "subject_id": user_id,
-            "key": belief_key,
+            "key": _remember_key(text, category),
             "value": text,
             "confidence": confidence,
             "belief_type": "fact" if category in ("bug_fix", "architecture") else "belief",
@@ -233,9 +265,6 @@ class MemgraphClient:
     def search(self, query: str, user_id: str, agent_id: str = None, limit: int = 10) -> Dict[str, Any]:
         """Search memories relevant to a query. Returns scored results.
 
-        Uses the v2 context endpoint which returns JSON with scored memories,
-        including semantic similarity, recency, confidence, and keyword signals.
-
         Args:
             query: What to search for (natural language)
             user_id: Which user's memories to search
@@ -246,57 +275,40 @@ class MemgraphClient:
             Dict with 'results' list, each containing:
               - content: The memory text
               - score: Relevance score (0-1)
-              - metadata: key, domain, belief_type
+              - metadata: key, value, domain, belief_type
+
+        Raises:
+            MemgraphAPIError / MemgraphConnectionError on server or network
+            failure — an outage never looks like "no memories".
         """
         self._validate_user_id(user_id)
-        # Use v2 context endpoint (returns proper JSON with scored memories)
-        # Build the v2 URL from the base URL
-        base = self.base_url.rstrip("/")
-        if "/v1" in base:
-            v2_url = base.replace("/v1", "/v2") + "/context"
-        elif "/v2" in base:
-            v2_url = base + "/context"
-        else:
-            v2_url = base + "/v2/context"
-
         payload = {"query": query, "user_id": user_id}
         if agent_id:
             payload["agent_id"] = agent_id
 
         try:
-            resp = self._session.post(v2_url, json=payload, timeout=self.timeout)
-            self._raise_for_status(resp)
-            data = resp.json()
-
-            # Normalize: v2/context returns {memories: [...]}
-            memories = data.get("memories", [])
-            results = []
-            for m in memories[:limit]:
-                results.append({
-                    "content": m.get("content", ""),
-                    "score": m.get("score", 0),
-                    "metadata": m.get("metadata", {}),
-                    "type": m.get("type", "belief"),
-                })
+            data = self._request("POST", "/context", api="v2", json=payload).json()
+        except MemgraphValidationError as e:
+            if e.status_code != 404:
+                raise
+            # Server without the v2 API: list the user's beliefs instead.
+            beliefs = self.get_beliefs(user_id=user_id, limit=limit)
+            items = beliefs if isinstance(beliefs, list) else beliefs.get("items", [])
+            results = [{"content": b.get("value", ""), "score": 1.0, "metadata": b, "type": "belief"}
+                       for b in items[:limit]]
             return {"results": results, "total": len(results)}
 
-        except (MemgraphAuthError, MemgraphValidationError):
-            raise  # Auth/validation errors should not be silenced
-        except (MemgraphConnectionError, requests.exceptions.ConnectionError, requests.exceptions.Timeout):
-            # Connection issues: fallback to get_beliefs
-            try:
-                beliefs = self.get_beliefs(user_id=user_id, limit=limit)
-                items = beliefs if isinstance(beliefs, list) else beliefs.get("items", [])
-                results = [
-                    {"content": f"{b.get('key','')}: {b.get('value','')}", "score": 1.0, "metadata": b}
-                    for b in items[:limit]
-                ]
-                return {"results": results, "total": len(results)}
-            except Exception:
-                return {"results": [], "total": 0}
-        except Exception:
-            # Unknown error: return empty (v2 endpoint may not exist on older servers)
-            return {"results": [], "total": 0}
+        results = [
+            {
+                "id": m.get("id"),
+                "content": _memory_text(m),
+                "score": m.get("score", 0),
+                "metadata": m.get("metadata", {}),
+                "type": m.get("type", "belief"),
+            }
+            for m in data.get("memories", [])[:limit]
+        ]
+        return {"results": results, "total": len(results)}
 
     def get_beliefs(self, user_id: str, limit: int = 50, cursor: str = None) -> Dict:
         """Fetch beliefs for a user with cursor-based pagination."""
@@ -444,7 +456,9 @@ class MemgraphClient:
                            token_budget: int = 4000) -> Dict[str, Any]:
         """Auto-recall: Fetch relevant memories before an LLM call.
 
-        Returns memory context ready to inject as a system message.
+        Returns ``memory_context`` (text to inject as a system message),
+        ``system_messages`` (ready-made messages list) and ``past_decisions``
+        — earlier attempts at similar tasks and how they turned out.
         """
         payload = {
             "user_id": user_id,
@@ -461,15 +475,18 @@ class MemgraphClient:
 
     def sidecar_post_flight(self, messages: List[Dict[str, str]], user_id: str,
                             thread_id: str = None,
-                            agent_id: str = "sdk_sidecar") -> Dict[str, Any]:
+                            agent_id: str = "sdk_sidecar",
+                            wait: bool = False) -> Dict[str, Any]:
         """Auto-learn: Extract learnable signals from a conversation exchange.
 
-        Learning happens in background — this returns immediately.
+        Returns immediately ({"status": "queued"}) and learns in the background.
+        Pass wait=True to extract now and get the belief counts back (slower).
         """
         payload = {
             "user_id": user_id,
             "agent_id": agent_id,
             "messages": messages,
+            "wait": wait,
         }
         if thread_id:
             payload["thread_id"] = thread_id
@@ -502,13 +519,7 @@ class MemgraphClient:
 
     def _v2_request(self, method: str, path: str, **kwargs: Any) -> requests.Response:
         """Make a request to the v2 API. Reuses _request() retry logic."""
-        # Temporarily swap base_url to v2
-        original_base = self.base_url
-        self.base_url = original_base.replace("/v1", "/v2")
-        try:
-            return self._request(method, path, **kwargs)
-        finally:
-            self.base_url = original_base
+        return self._request(method, path, api="v2", **kwargs)
 
     # ------------------------------------------------------------------
     # Context Graph (Core Interface)
@@ -665,7 +676,9 @@ class MemgraphClient:
                 - tool_name (str): Name of the tool
                 - tool_input (any, optional): Input to the tool
                 - tool_output (any, optional): Output from the tool
-            beliefs_used: List of belief text strings consulted.
+            beliefs_used: IDs of the beliefs the agent relied on (the ``id`` of
+                ``search()`` results). On a FAILURE/SUCCESS outcome their
+                confidence is lowered/raised.
             confidence: Overall decision confidence (0.0-1.0).
             outcome: Result — "SUCCESS", "FAILURE", "PARTIAL", "UNKNOWN", or "REVERTED".
             outcome_assessment: Free-text explanation of the outcome.
@@ -699,6 +712,29 @@ class MemgraphClient:
     def get_decision(self, decision_id: str) -> Dict[str, Any]:
         """Get a decision by ID."""
         resp = self._v2_request("GET", f"/decisions/{decision_id}")
+        return resp.json()
+
+    def record_outcome(self, decision_id: str, outcome: str, feedback: Optional[str] = None) -> Dict[str, Any]:
+        """Report how a decision turned out, once you know.
+
+        FAILURE lowers the confidence of the beliefs the decision used and
+        makes the failure show up as a lesson the next time a similar task
+        comes in (``get_context_graph`` / ``sidecar_pre_flight``).
+
+        Args:
+            decision_id: ID returned by ``record_decision``.
+            outcome: "SUCCESS", "FAILURE" or "PARTIAL".
+            feedback: Why — shown to the agent next time ("refunds only within 30 days").
+        """
+        payload: Dict[str, Any] = {"decision_id": decision_id, "outcome": outcome.upper()}
+        if feedback:
+            payload["feedback"] = feedback
+        resp = self._v2_request("POST", "/outcomes/record", json=payload)
+        return resp.json()
+
+    def delete_decision(self, decision_id: str) -> Dict[str, Any]:
+        """Delete a decision and its context snapshot."""
+        resp = self._v2_request("DELETE", f"/decisions/{decision_id}")
         return resp.json()
 
     def explain_decision(self, decision_id: str) -> Dict[str, Any]:
