@@ -44,6 +44,23 @@ def _memory_text(memory: Dict[str, Any]) -> str:
     return content
 
 
+def client_headers(api_key: str, client: str) -> Dict[str, str]:
+    """Auth plus who-is-calling headers (SDK version, Python, OS) — no user data.
+
+    Lets the Memgraph AI team see which SDK versions and clients are in use
+    and where integrations fail.
+    """
+    import platform
+
+    from memgraph_sdk import __version__
+    runtime = f"python {platform.python_version()}; {platform.system()}"
+    return {
+        "X-API-KEY": api_key,
+        "User-Agent": f"memgraph-sdk/{__version__} ({runtime})",
+        "X-Memgraph-Client": client,
+    }
+
+
 def _remember_key(text: str, category: str) -> str:
     short = text[:60].strip().lower()
     clean = "".join(c if c.isalnum() or c == " " else "" for c in short)
@@ -89,7 +106,7 @@ class MemgraphClient:
         )
         self.timeout = timeout
         self.max_retries = max_retries
-        self.headers = {"X-API-KEY": api_key}
+        self.headers = client_headers(api_key, "sdk")
         self._session = requests.Session()
         self._session.headers.update(self.headers)
 

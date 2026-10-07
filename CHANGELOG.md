@@ -4,6 +4,11 @@ All notable changes to the Memgraph SDK will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.8.5] - 2026-10-07
+
+### Added
+- Requests identify the client: `User-Agent: memgraph-sdk/<version> (python <x.y.z>; <OS>)` and `X-Memgraph-Client: sdk | async | cli | mcp`. No user data is sent. This lets the Memgraph AI team see which SDK versions are in use and where integrations fail.
+
 ## [0.8.4] - 2026-10-07
 
 ### Changed

@@ -18,6 +18,11 @@ try:
 except ImportError:
     requests = None
 
+def _cli_headers(api_key: str) -> dict:
+    from memgraph_sdk.client import client_headers
+    return client_headers(api_key or "", "cli")
+
+
 # --- Constants ---
 CLOUD_URL = "https://api.memgraph.ai/v1"
 LOCAL_URL = os.getenv("MEMGRAPH_API_URL", "http://localhost:8001/v1")
@@ -208,7 +213,7 @@ def remember_cmd(text: str, category: str = "general"):
                 "belief_type": "belief",
                 "domain": "general",
             },
-            headers={"X-API-KEY": config.get("api_key", "")},
+            headers=_cli_headers(config.get("api_key", "")),
             timeout=10
         )
         if resp.status_code in (200, 201):
@@ -230,7 +235,7 @@ def recall_cmd(query: str):
         print("Error: Not configured. Run 'memgraph setup <api_key>' or export MEMGRAPH_API_KEY.")
         return
 
-    headers = {"X-API-KEY": config.get("api_key", "")}
+    headers = _cli_headers(config.get("api_key", ""))
     api_url = config["api_url"].rstrip("/")
 
     try:
@@ -365,7 +370,7 @@ def setup_cmd(api_key: str):
     try:
         resp = requests.get(
             f"{api_url}/auth/whoami",
-            headers={"X-API-KEY": api_key},
+            headers=_cli_headers(api_key),
             timeout=10,
         )
         if resp.status_code == 200:

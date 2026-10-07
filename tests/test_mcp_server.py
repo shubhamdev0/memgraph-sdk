@@ -335,7 +335,8 @@ class TestMCPCloudVsOnPremURL(unittest.TestCase):
         os.environ.pop("MEMGRAPH_TENANT_ID", None)
         try:
             mcp = self._reimport_mcp()
-            assert mcp._get_client().headers == {"X-API-KEY": "mg_key"}
+            assert mcp._get_client().headers["X-API-KEY"] == "mg_key"
+            assert mcp._get_client()._session.headers["X-Memgraph-Client"] == "mcp"
         except SystemExit:
             self.fail("MCP module exited unexpectedly")
         finally:

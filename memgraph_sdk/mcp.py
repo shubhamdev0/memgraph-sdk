@@ -83,6 +83,7 @@ def _get_client() -> MemgraphClient:
         kwargs["base_url"] = API_URL
 
     memgraph = MemgraphClient(**kwargs)
+    memgraph._session.headers["X-Memgraph-Client"] = "mcp"
     logger.info("Memgraph MCP client initialized: %s", _get_client().base_url)
     return memgraph
 

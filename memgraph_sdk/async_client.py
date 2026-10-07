@@ -24,7 +24,7 @@ try:
 except ImportError:
     httpx = None
 
-from memgraph_sdk.client import _api_root, _memory_text, _remember_key
+from memgraph_sdk.client import _api_root, _memory_text, _remember_key, client_headers
 from memgraph_sdk.exceptions import (
     MemgraphAPIError,
     MemgraphAuthError,
@@ -57,7 +57,7 @@ class AsyncMemgraphClient:
         self.max_retries = max_retries
         self.timeout = timeout
         self._client = httpx.AsyncClient(
-            headers={"X-API-KEY": api_key},
+            headers=client_headers(api_key, "async"),
             timeout=timeout,
         )
 

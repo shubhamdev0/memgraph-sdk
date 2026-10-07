@@ -32,7 +32,9 @@ class TestClientInit(unittest.TestCase):
 
     def test_headers(self):
         client = MemgraphClient(api_key="mg_my_key", tenant_id="t")
-        assert client.headers == {"X-API-KEY": "mg_my_key"}
+        assert client.headers["X-API-KEY"] == "mg_my_key"
+        assert client.headers["X-Memgraph-Client"] == "sdk"
+        assert client.headers["User-Agent"].startswith("memgraph-sdk/")
 
     def test_tenant_id_optional(self):
         """tenant_id can be omitted — server resolves from API key."""
