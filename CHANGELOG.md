@@ -4,6 +4,11 @@ All notable changes to the Memgraph SDK will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.8.4] - 2026-10-07
+
+### Changed
+- Rewrote the README (also shown on PyPI): quickstart, memory updates, learning from outcomes, sidecar, error handling and retries, thread safety, MCP tools, CLI configuration. No code changes.
+
 ## [0.8.3] - 2026-10-05
 
 ### Fixed
