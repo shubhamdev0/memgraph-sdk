@@ -4,6 +4,11 @@ All notable changes to the Memgraph SDK will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.8.6] - 2026-10-09
+
+### Fixed
+- `memgraph status` no longer prints `Tenant: None` when the tenant comes from the API key.
+
 ## [0.8.5] - 2026-10-07
 
 ### Added

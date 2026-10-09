@@ -304,7 +304,7 @@ def status_cmd():
         return
 
     print(f"📡 API URL: {config['api_url']}")
-    print(f"🏢 Tenant:  {config['tenant_id']}")
+    print(f"🏢 Tenant:  {config['tenant_id'] or '(resolved from your API key)'}")
     print(f"🔑 API Key: {'***' + config['api_key'][-4:] if config.get('api_key') else '(not set)'}")
 
     if requests:
